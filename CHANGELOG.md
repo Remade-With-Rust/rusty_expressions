@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Depend on `rusty_alloc-api` 1.1.4 (was 0.4.0). Published so crates.io carries
+  the current allocator; 0.1.3 still pins the old one.
+- No engine change. Re-verified on the new allocator: 26 tests across three
+  feature configurations, wasm32, 50/50 harvested vectors against live libonig,
+  25_600 prefilter differential cases, 21_500 constructs cases, a 30_092-check
+  context audit and 99_501 API property checks -- all clean.
+
 ## 0.1.3
 
 Documentation only; no code change.
