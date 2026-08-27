@@ -20,16 +20,18 @@ pub fn scan(re: &Regex, hay: &[u8], param: &MatchParam) -> Result<Vec<Region>, E
                 let Range { start, end } = r.range();
                 out.push(r);
                 if end == start {
-                    if pos >= hay.len() {
+                    // Advance past the MATCH, not past the cursor. The search
+                    // may have skipped ahead to find this empty match, and
+                    // stepping from `pos` would leave the cursor behind it --
+                    // so the next round found the very same match again.
+                    if start >= hay.len() {
                         break;
                     }
-                    pos += match re.encoding().mbc_len(hay.get(pos..).unwrap_or(&[])) {
+                    let step = match re.encoding().mbc_len(hay.get(start..).unwrap_or(&[])) {
                         Ok(n) if n > 0 => n,
                         _ => 1,
                     };
-                    if pos == 0 {
-                        break;
-                    }
+                    pos = start + step;
                 } else {
                     pos = end;
                 }

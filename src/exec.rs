@@ -179,7 +179,12 @@ pub fn search(
         && !options.contains(Options::NOTBOL)
         && !whole
         && enc.min_len() == 1;
-    let slice_end = end.min(hay.len());
+    // `pos == end` is a legal start position, so a scan looking for candidate
+    // STARTS must be able to reach it -- bounding at `end` made every filter
+    // stop one position early. A match may also run past `end`, so anything
+    // looking for bytes the match will CONSUME searches the whole haystack.
+    let scan_end = end.saturating_add(1).min(hay.len());
+    let lit_end = hay.len();
     let single_byte = enc.max_len() == 1;
     let find_longest = options.contains(Options::FIND_LONGEST);
     let find_not_empty = options.contains(Options::FIND_NOT_EMPTY);
@@ -217,14 +222,14 @@ pub fn search(
                     match bol_lit {
                         Some(lit) => {
                             let stop_at = pos + lit.len();
-                            if stop_at <= slice_end && &hay[pos..stop_at] == lit {
+                            if stop_at <= lit_end && &hay[pos..stop_at] == lit {
                                 break;
                             }
                         }
                         None => break,
                     }
                 }
-                match hay[pos..slice_end].iter().position(|&b| b == b'\n') {
+                match hay[pos..scan_end].iter().position(|&b| b == b'\n') {
                     Some(off) => {
                         super::count::tick_byte_scan(off as u64 + 1);
                         let n = pos + off + 1;
@@ -237,7 +242,7 @@ pub fn search(
                         }
                     }
                     None => {
-                        super::count::tick_byte_scan((slice_end - pos) as u64);
+                        super::count::tick_byte_scan((scan_end - pos) as u64);
                         break 'outer;
                     }
                 }
@@ -247,12 +252,12 @@ pub fn search(
         if bol_lit.is_none() {
         if let Some(rl) = req {
             let need_from = pos.saturating_add(rl.min_dist as usize);
-            if need_from > slice_end {
+            if need_from > lit_end {
                 break;
             }
             if req_q.map(|q| q < need_from).unwrap_or(true) {
                 super::count::tick_req_scan();
-                req_q = super::optimize::find_bytes(&hay[need_from..slice_end], &rl.bytes)
+                req_q = super::optimize::find_bytes(&hay[need_from..lit_end], &rl.bytes)
                     .map(|off| need_from + off);
                 if req_q.is_none() {
                     // The literal does not occur again, so nothing can match.
@@ -274,6 +279,10 @@ pub fn search(
             if floor > pos {
                 super::count::tick_req_skip((floor - pos) as u64);
                 pos = floor;
+                // The literal may sit past the last legal start position.
+                if pos > end {
+                    break;
+                }
             }
         }
         }
@@ -282,16 +291,16 @@ pub fn search(
         // byte is known good and this test is dead work.
         if let (None, Some(ref lead)) = (bol_lit, lead) {
             if !whole && enc.min_len() == 1 && pos < hay.len() && !lead.contains(hay[pos]) {
-                if pos >= slice_end {
+                if pos >= scan_end {
                     break;
                 }
-                match scan_lead(&hay[pos..slice_end], lead) {
+                match scan_lead(&hay[pos..scan_end], lead) {
                     Some(off) => {
                         super::count::tick_byte_scan(off as u64);
                         pos += off;
                     }
                     None => {
-                        super::count::tick_byte_scan((slice_end - pos) as u64);
+                        super::count::tick_byte_scan((scan_end - pos) as u64);
                         break;
                     }
                 }

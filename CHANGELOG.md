@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.1
+
+Three correctness fixes, all found by a new property fuzz over `MatchParam`,
+`RegSet`, `scan` and `search_range_param` (99_501 checks, now 0 violations).
+
+- `scan` returned the **same empty match repeatedly**. It advanced past the
+  scan cursor rather than past the match, so whenever the search skipped ahead
+  to an empty match the cursor stayed behind it and re-found it. Affected
+  `find_all` / `find_all_str` too.
+- `search_range_param` **missed matches starting at exactly `range`**. The
+  candidate-position scans were bounded at `end` when `pos == end` is a legal
+  start, so every prefilter stopped one position early.
+- `search_range_param` could **return a match starting past `range`**. The
+  required-literal filter may legitimately find its literal beyond the last
+  legal start; the resulting skip was not bounded by the range.
+
 ## 0.1.0
 
 First release. Oniguruma 6.9.10 remade in pure Rust.
