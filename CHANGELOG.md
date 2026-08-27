@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3
+
+Documentation only; no code change.
+
+- Refreshed the measured performance figures against live libonig: `ours/onig`
+  0.32 on search (reproduced 0.32 / 0.32 / 0.31), **23 of 23 benchmark cases
+  ours-faster with none tied or lost**, and 0.50 on compile.
+- Recorded the standing gate counts, including the API property fuzz over
+  `MatchParam`, `RegSet`, `scan` and `search_range_param`.
+
 ## 0.1.2
 
 Three more fixes, found by probing what the differential gates structurally

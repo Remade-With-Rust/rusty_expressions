@@ -14,8 +14,9 @@
 > `no_std` + `alloc`, and it builds for `wasm32-unknown-unknown`.
 >
 > It is **match-equivalent to Oniguruma 6.9.10** — verified on a harvested
-> corpus and on tens of thousands of differential cases run against live
-> `libonig` — and about **3x faster than libonig on search**.
+> corpus and on **~180 000 differential and property cases** run against live
+> `libonig` — and **~3x faster than libonig on search**, winning all 23 cases
+> in the benchmark suite.
 
 Part of **[Remade With Rust](https://github.com/Remade-With-Rust)** by
 **[Mata Network](https://www.mata.network/)**.
@@ -51,31 +52,40 @@ Rust, with the C deleted.
 
 Measured against **live `libonig`** in the same process, 64 KB corpora,
 ABBA-interleaved, medians of 11 rounds, with a null arm establishing the noise
-floor (**0.0 % arm skew, 1–4 % p10–p90 spread**). Lower is better.
+floor (**0.0 % arm skew, 1 % p10-p90 spread**). Lower is better. Reproduced at
+0.32 / 0.32 / 0.31 across three runs.
 
-**`ours/onig = 0.32` overall — and there is no case where libonig wins.**
+**`ours/onig = 0.32` overall — 23 of 23 cases ours-faster. libonig does not win
+a single one.**
 
 | category | case | ours | libonig | ratio |
 |---|---|---:|---:|---:|
-| structure | `[\w.]+@[\w.]+\.\w+` | 54 µs | 2430 µs | **0.02** |
-| onig-only | `(?>\w+)=` atomic | 262 µs | 2859 µs | **0.09** |
-| onig-only | `\d++ms` possessive | 114 µs | 1311 µs | **0.09** |
-| onig-only | `\d+(?= ms)` look-ahead | 96 µs | 936 µs | **0.10** |
-| class | `[#@%^&]+` (no match) | 26 µs | 231 µs | **0.11** |
-| unicode | `\p{Greek}+` | 134 µs | 811 µs | **0.16** |
-| structure | `\d+\.\d+\.\d+\.\d+` | 157 µs | 989 µs | **0.16** |
-| capture | `(\w+)=(\w+)` | 398 µs | 2172 µs | **0.18** |
-| capture | `(?<k>\w+)=(?<v>\w+)` | 502 µs | 2302 µs | **0.22** |
-| unicode | `\p{Lu}+` | 236 µs | 993 µs | **0.24** |
-| capture | `(\d{4})-(\d{2})-(\d{2})` | 127 µs | 461 µs | **0.28** |
-| class | `[0-9]+` | 230 µs | 591 µs | **0.39** |
-| class | `\w+` | 1201 µs | 2386 µs | **0.50** |
-| onig-only | `(\w+) \1` backref | 1677 µs | 3132 µs | **0.54** |
-| anchor | `(?m)^2026` | 78 µs | 135 µs | **0.58** |
-| onig-only | `(?<=status=)\d+` | 1234 µs | 1898 µs | **0.65** |
-| icase | `(?i)[a-z]+ing` | 1728 µs | 1905 µs | **0.91** |
+| structure | `[\w.]+@[\w.]+\.\w+` | 53 µs | 2644 µs | **0.02** |
+| onig-only | `\d++ms` possessive | 100 µs | 1274 µs | **0.08** |
+| onig-only | `\d+(?= ms)` look-ahead | 75 µs | 927 µs | **0.08** |
+| onig-only | `(?>\w+)=` atomic | 242 µs | 2685 µs | **0.09** |
+| class | `[#@%^&]+` (no match) | 29 µs | 235 µs | **0.12** |
+| structure | `\d+\.\d+\.\d+\.\d+` | 150 µs | 976 µs | **0.15** |
+| unicode | `\p{Greek}+` | 125 µs | 802 µs | **0.16** |
+| capture | `(\w+)=(\w+)` | 398 µs | 2395 µs | **0.17** |
+| unicode | `\p{Lu}+` | 190 µs | 925 µs | **0.21** |
+| capture | `(?<k>\w+)=(?<v>\w+)` | 488 µs | 2345 µs | **0.21** |
+| alt | `INFO\|WARN\|ERROR\|DEBUG` | 85 µs | 346 µs | **0.24** |
+| capture | `(\d{4})-(\d{2})-(\d{2})` | 134 µs | 532 µs | **0.25** |
+| literal | `fox` (find-all) | 28 µs | 77 µs | **0.36** |
+| class | `[0-9]+` | 216 µs | 589 µs | **0.37** |
+| structure | `https?://[\w./?=&-]+` | 47 µs | 106 µs | **0.45** |
+| class | `\w+` | 1186 µs | 2518 µs | **0.47** |
+| onig-only | `(\w+) ` backref | 1841 µs | 3429 µs | **0.54** |
+| anchor | `(?m)^2026` | 81 µs | 143 µs | **0.56** |
+| alt | `fox\|dog\|cat` | 172 µs | 300 µs | **0.57** |
+| onig-only | `(?<=status=)\d+` | 1266 µs | 2070 µs | **0.61** |
+| literal | `zzzqqq` (absent) | 19 µs | 26 µs | **0.75** |
+| icase | `(?i)[a-z]+ing` | 1639 µs | 2126 µs | **0.77** |
+| icase | `(?i)THE QUICK` | 350 µs | 405 µs | **0.87** |
 
-**23 of 23 cases ours-faster or tied. Compile is ~2x faster too** (`0.48`).
+Throughput peaks at **1.2 GB/s** (email extraction) and **2.2 GB/s** (a class
+that cannot match). **Compile is ~2x faster too** (`0.50`).
 
 ### How
 
@@ -114,6 +124,7 @@ itself gates in its own bugs.
 | Prefilter differential | 25 600 generated pattern × haystack pairs; every skip cross-checked against an unfiltered scan | **0** |
 | Constructs differential | 21 500 pairs over atomic / look-around / absent / conditional / subexp-call | **0** |
 | Context audit | 30 092 checks over 6 encodings, 6 option sets, 7 syntax dialects, user properties, capture spill, non-zero search starts | **0** |
+| API property fuzz | ~100 000 checks over `MatchParam` limits, `RegSet`, `scan`, `search_range_param` | **0** |
 | Callout verbs, subexp captures, class escapes, line anchors | targeted vs libonig | **0** |
 
 Bugs these gates caught during development — each one invisible to a suite
@@ -126,6 +137,9 @@ that only checks whole-match ranges:
 - `(?m)^$` matching at end-of-string after a trailing newline
 - a required-literal filter skipping past matches once a user property was
   registered
+- `scan` returning the same empty match repeatedly
+- two denial-of-service aborts on untrusted *patterns*: deep nesting, and a
+  long chain of quantifiers
 
 ## 🔒 Safety and limits
 
@@ -138,6 +152,8 @@ that only checks whole-match ranges:
   silent mismatch.
 - A greedy repeat runs on the heap, not the call stack: `.+` over **1 MB**
   matches in ~13 ms rather than aborting.
+- Pattern **nesting depth** and **VM recursion depth** are bounded too, so a
+  hostile pattern gets an `Err`, never a process abort.
 
 ## 📦 Install
 
