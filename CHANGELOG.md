@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.2
+
+Three more fixes, found by probing what the differential gates structurally
+cannot see. Two are denial-of-service defects on untrusted *patterns*.
+
+- **A deeply nested pattern aborted the process.** Parsing, compiling and the
+  compile-time analysis are all recursive over pattern structure, so nesting
+  depth is native call depth; `((((...))))` died around 400 levels. The parse
+  depth limit existed but was set to 4096 -- above the ceiling it was meant to
+  protect. Now 200, and nested character classes (which recursed outside the
+  guarded path) are bounded too. Any depth now returns `ParseDepthLimit`.
+- **A long chain of quantifiers aborted the process.** `a{1,2}a{1,2}...`
+  recurses at match time because each repeat's continuation calls into the
+  next -- flat in the pattern, deep on the stack. The retry counters could not
+  catch it: they are counts, and the stack runs out long before a count limit
+  sized for pathological backtracking fires. The VM now carries a real
+  recursion-depth guard and returns `MatchStackLimit`.
+- **Capture history kept entries from abandoned branches.** `hist` was pushed
+  on a closing `Save` and never unwound, so a failed alternative left captures
+  in the history tree that the match never made. History is now unwound
+  wherever captures are.
+
 ## 0.1.1
 
 Three correctness fixes, all found by a new property fuzz over `MatchParam`,

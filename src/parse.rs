@@ -184,14 +184,33 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_alts(&mut self) -> Result<Node, Error> {
-        self.depth += 1;
-        if self.depth > 4096 {
+    /// Nesting depth the parser will accept.
+    ///
+    /// This is a **native stack** limit, not a taste limit. Parsing,
+    /// compiling and the compile-time analysis walks are all recursive over
+    /// the pattern's structure, so nesting depth is call depth. Measured
+    /// ceiling on a 1 MB main-thread stack is ~400 nested groups; this leaves
+    /// a 2x margin, and callers on smaller stacks (embedded, wasm) get the
+    /// benefit. Real patterns nest a handful of levels.
+    ///
+    /// The previous value of 4096 was above the ceiling it was meant to
+    /// protect -- the same mistake as a match-stack limit set above what the
+    /// native stack can hold: the guard existed but could never fire first.
+    const MAX_PARSE_DEPTH: usize = 200;
+
+    fn check_depth(&self) -> Result<(), Error> {
+        if self.depth > Self::MAX_PARSE_DEPTH {
             return Err(Error::kind_msg(
                 super::error::ErrorKind::ParseDepthLimit,
                 "parse depth",
             ));
         }
+        Ok(())
+    }
+
+    fn parse_alts(&mut self) -> Result<Node, Error> {
+        self.depth += 1;
+        self.check_depth()?;
         let mut alts = Vec::new();
         loop {
             self.skip_ws_if_extend()?;
@@ -1169,6 +1188,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_items(&mut self, end: u8) -> Result<Vec<ClassItem>, Error> {
+        // Nested classes recurse here rather than through `parse_alts`, so
+        // they need the same bound.
+        self.depth += 1;
+        self.check_depth()?;
+        let r = self.parse_class_items_inner(end);
+        self.depth -= 1;
+        r
+    }
+
+    fn parse_class_items_inner(&mut self, end: u8) -> Result<Vec<ClassItem>, Error> {
         let mut items = Vec::new();
         let mut first = true;
         while self.peek_code().is_some() && (first || self.peek_byte() != Some(end)) {

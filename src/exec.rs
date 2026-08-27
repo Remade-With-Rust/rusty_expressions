@@ -140,6 +140,15 @@ pub struct Engine<'a> {
     bol_guaranteed: bool,
     /// Offset this attempt began at.
     attempt_start: usize,
+    /// Current `run_stop` recursion depth.
+    ///
+    /// The VM recurses for alternation, look-around, atomic groups, subexp
+    /// calls and a repeat's continuation -- so a flat chain like
+    /// `a{1,2}a{1,2}...` is call depth too, not just nesting. The retry
+    /// counters cannot catch that: they are counts, and the native stack runs
+    /// out thousands of retries before a count limit set for pathological
+    /// backtracking would fire.
+    rdepth: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +446,7 @@ impl<'a> Engine<'a> {
             enc_min_len: enc.min_len(),
             bol_guaranteed: false,
             attempt_start: 0,
+            rdepth: 0,
         }
     }
 
@@ -457,6 +467,7 @@ impl<'a> Engine<'a> {
         self.hay_end = self.hay.len();
         self.keep = at;
         self.attempt_start = at;
+        self.rdepth = 0;
         self.retry_match = 0;
         self.calls = 0;
         self.skip_to = None;
@@ -1222,7 +1233,33 @@ impl<'a> Engine<'a> {
         self.run_stop(start, pos, Some(end))
     }
 
+    /// Maximum VM recursion depth.
+    ///
+    /// A native-stack bound, deliberately well under the measured ceiling
+    /// (~1000 frames on a 1 MB stack) so callers on smaller stacks are safe
+    /// too. Exceeding it is a `MatchStackLimit` error, never an abort.
+    const MAX_RUN_DEPTH: u32 = 300;
+
     fn run_stop(
+        &mut self,
+        pc: usize,
+        pos: usize,
+        stop: Option<usize>,
+    ) -> Result<Option<usize>, Error> {
+        self.rdepth += 1;
+        if self.rdepth > Self::MAX_RUN_DEPTH {
+            self.rdepth -= 1;
+            return Err(Error::kind_msg(
+                ErrorKind::MatchStackLimit,
+                "match recursion depth",
+            ));
+        }
+        let r = self.run_stop_inner(pc, pos, stop);
+        self.rdepth -= 1;
+        r
+    }
+
+    fn run_stop_inner(
         &mut self,
         mut pc: usize,
         mut pos: usize,
@@ -1307,15 +1344,18 @@ impl<'a> Engine<'a> {
                     let (a, b) = (*a as usize, *b as usize);
                     let saved = if self.writes_caps {
                         super::count::tick_cap_clone();
-                        Some(self.captures.clone())
+                        Some((self.captures.clone(), self.hist.len()))
                     } else {
                         None
                     };
                     if let Some(r) = self.run_stop(a, pos, stop)? {
                         return Ok(Some(r));
                     }
-                    if let Some(saved) = saved {
+                    if let Some((saved, hlen)) = saved {
                         self.captures = saved;
+                        // Drop capture-history recorded by the abandoned
+                        // branch; it describes captures the match never made.
+                        self.hist.truncate(hlen);
                     }
                     pc = b;
                 }
@@ -1907,7 +1947,7 @@ impl<'a> Engine<'a> {
         // from, plus (only when the body writes captures) the capture state to
         // restore if the whole repetition fails from here.
         let mut trail: Vec<usize> = Vec::new();
-        let mut caps_trail: Vec<Caps> = Vec::new();
+        let mut caps_trail: Vec<(Caps, usize)> = Vec::new();
         let mut p = pos;
         let mut c = count;
         // `count > max` at a level yields nothing at all, not even the
@@ -1927,7 +1967,7 @@ impl<'a> Engine<'a> {
                 }
                 let cap = if writes_caps {
                     super::count::tick_cap_clone();
-                    Some(self.captures.clone())
+                    Some((self.captures.clone(), self.hist.len()))
                 } else {
                     None
                 };
@@ -1947,8 +1987,9 @@ impl<'a> Engine<'a> {
                         self.check_repeat_depth(trail.len())?;
                     }
                     None => {
-                        if let Some(cc) = cap {
+                        if let Some((cc, hlen)) = cap {
                             self.captures = cc;
+                            self.hist.truncate(hlen);
                         }
                         break;
                     }
@@ -1966,8 +2007,9 @@ impl<'a> Engine<'a> {
                     None => return Ok(None),
                     Some(prev) => {
                         if writes_caps {
-                            if let Some(cc) = caps_trail.pop() {
+                            if let Some((cc, hlen)) = caps_trail.pop() {
                                 self.captures = cc;
+                                self.hist.truncate(hlen);
                             }
                         }
                         p = prev;
@@ -1994,7 +2036,7 @@ impl<'a> Engine<'a> {
             }
             let cap = if writes_caps {
                 super::count::tick_cap_clone();
-                Some(self.captures.clone())
+                Some((self.captures.clone(), self.hist.len()))
             } else {
                 None
             };
@@ -2012,8 +2054,9 @@ impl<'a> Engine<'a> {
                     self.check_repeat_depth(trail.len())?;
                 }
                 None => {
-                    if let Some(cc) = cap {
+                    if let Some((cc, hlen)) = cap {
                         self.captures = cc;
+                        self.hist.truncate(hlen);
                     }
                     break;
                 }
@@ -2021,8 +2064,9 @@ impl<'a> Engine<'a> {
         }
         // Every level that failed restores the captures it snapshotted, from
         // the deepest outwards, so the shallowest snapshot lands last.
-        while let Some(cc) = caps_trail.pop() {
+        while let Some((cc, hlen)) = caps_trail.pop() {
             self.captures = cc;
+            self.hist.truncate(hlen);
         }
         Ok(None)
     }
@@ -2127,7 +2171,7 @@ impl<'a> Engine<'a> {
     ) -> Result<bool, Error> {
         let cap = if self.writes_caps {
             super::count::tick_cap_clone();
-            Some(self.captures.clone())
+            Some((self.captures.clone(), self.hist.len()))
         } else {
             None
         };
@@ -2168,8 +2212,9 @@ impl<'a> Engine<'a> {
         } else {
             self.run_until(body, after, pos)?.is_some()
         };
-        if let Some(cap) = cap {
+        if let Some((cap, hlen)) = cap {
             self.captures = cap;
+            self.hist.truncate(hlen);
         }
         Ok(r)
     }
@@ -2247,13 +2292,14 @@ impl<'a> Engine<'a> {
         while p <= self.hay_end {
             let cap = if self.writes_caps {
                 super::count::tick_cap_clone();
-                Some(self.captures.clone())
+                Some((self.captures.clone(), self.hist.len()))
             } else {
                 None
             };
             let hit = self.run_until(stopper, after, p)?.is_some();
-            if let Some(cap) = cap {
+            if let Some((cap, hlen)) = cap {
                 self.captures = cap;
+                self.hist.truncate(hlen);
             }
             if hit {
                 return Ok(Some(p));
