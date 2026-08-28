@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.1...v0.2.2) - 2026-08-28
+
+### Other
+
+- bump rusty_alloc-api to =1.1.6 ([#4](https://github.com/Remade-With-Rust/rusty_expressions/pull/4))
+
 ## [0.2.1](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.0...v0.2.1) - 2026-08-28
 
 ### Other
