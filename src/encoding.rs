@@ -131,6 +131,21 @@ impl Encoding {
         }
     }
 
+    /// Can a byte scan land anywhere and still know where characters begin?
+    ///
+    /// True for the single-byte encodings (every offset is a boundary) and for
+    /// UTF-8, whose continuation bytes are all >= 0x80 and so can never be
+    /// mistaken for an ASCII byte a prefilter is hunting.
+    ///
+    /// False for the CJK encodings, where trail bytes overlap ASCII: in Big5
+    /// the two bytes `AD 61` are one character, so a scan for `a` finds the
+    /// 0x61 and would report a match libonig does not -- 0x61 there is the
+    /// tail of a character, not the letter. Prefilters must stay off unless
+    /// this holds.
+    pub fn self_sync(self) -> bool {
+        self.max_len() == 1 || matches!(self.kind, EncKind::Utf8)
+    }
+
     pub fn max_len(self) -> usize {
         match self.kind {
             EncKind::Utf8 => 4,
@@ -197,6 +212,17 @@ impl Encoding {
             EncKind::EucCn => gb18030_to_unicode(b).unwrap_or_else(|_| pack_mbc(b)),
             EncKind::EucTw | EncKind::EucKr => pack_mbc(b),
         })
+    }
+
+    /// How many bytes this code occupies in this encoding.
+    ///
+    /// Oniguruma's `ONIGENC_CODE_TO_MBCLEN`, which its ctype rules for the
+    /// multi-byte encodings are written in terms of. Our codes are transcoded
+    /// to Unicode, so the faithful way to ask is to encode one back.
+    /// Undecodable codes count as one byte, matching the length tables.
+    pub fn code_mbc_len(self, code: u32) -> usize {
+        let mut buf = [0u8; 8];
+        self.code_to_mbc(code, &mut buf).unwrap_or(1)
     }
 
     pub fn code_to_mbc(self, code: u32, out: &mut [u8]) -> Result<usize, Error> {
@@ -313,15 +339,22 @@ fn enc_err(msg: &str) -> Error {
     Error::kind_msg(ErrorKind::InvalidEncoding, msg)
 }
 
+/// Byte length of the UTF-8 character starting at `b0`, Oniguruma's way.
+///
+/// A byte that starts nothing valid is one character long, not an error:
+/// libonig scans undecodable input rather than refusing it, so `.` matches a
+/// stray 0x82 and `..` matches two of them. Refusing here made us return no
+/// match where libonig returns one -- eight differences on the audit, all on
+/// haystacks that are not valid UTF-8.
+///
+/// The table is generated from libonig; see `enc_mbclen.rs`.
 fn utf8_len(b0: u8) -> Result<usize, Error> {
-    match b0 {
-        0x00..=0x7f => Ok(1),
-        0xc2..=0xdf => Ok(2),
-        0xe0..=0xef => Ok(3),
-        0xf0..=0xf4 => Ok(4),
-        _ => Err(enc_err("invalid UTF-8 lead")),
-    }
+    Ok(super::enc_mbclen::LEN_UTF8[b0 as usize] as usize)
 }
+
+/// Oniguruma's `VALID_CODE_LIMIT`: undecodable bytes are reported as codes
+/// above every real codepoint, so no character class can match them.
+const INVALID_CODE_BASE: u32 = 0x8000_0000;
 
 fn utf8_to_code(b: &[u8]) -> Result<u32, Error> {
     if let [c] = b {
@@ -330,12 +363,20 @@ fn utf8_to_code(b: &[u8]) -> Result<u32, Error> {
         }
     }
     super::count::tick_utf8_str();
-    core::str::from_utf8(b)
-        .map_err(|_| enc_err("invalid UTF-8"))?
-        .chars()
-        .next()
-        .map(|c| c as u32)
-        .ok_or_else(|| enc_err("empty UTF-8"))
+    match core::str::from_utf8(b).ok().and_then(|s| s.chars().next()) {
+        Some(c) => Ok(c as u32),
+        // Undecodable. `utf8_len` already agreed with libonig that this is a
+        // character; refusing a code here would only move the error one step
+        // later. Oniguruma's USE_INVALID_CODE_SCHEME lifts the byte above the
+        // valid range instead, so the character still has a width and still
+        // matches `.` and `[^a]`, but matches no character class at all --
+        // returning the bare byte made 0xA0 read as U+00A0 and so as
+        // whitespace, where libonig matches nothing.
+        None => b
+            .first()
+            .map(|&x| INVALID_CODE_BASE + u32::from(x))
+            .ok_or_else(|| enc_err("empty UTF-8")),
+    }
 }
 
 fn code_to_utf8(code: u32, out: &mut [u8]) -> Result<usize, Error> {
@@ -446,6 +487,15 @@ fn gb18030_len(p: &[u8]) -> Result<usize, Error> {
     }
 }
 
+/// EUC-JP and EUC-TW.
+///
+/// Deliberately does NOT validate the trail byte, because libonig's character
+/// walk does not either: `..` in EUC-JP spans the four bytes `E4 B8 AD 61` as
+/// two characters, and `[a-z]+` finds nothing in them. Adding validation made
+/// the walk disagree with libonig on seven cases to fix three.
+///
+/// The generated table in `enc_mbclen.rs` records the same lengths, measured
+/// from the C library.
 fn euc_jp_len(p: &[u8]) -> usize {
     match p[0] {
         0x8e if p.len() >= 2 => 2,
@@ -455,6 +505,7 @@ fn euc_jp_len(p: &[u8]) -> usize {
     }
 }
 
+/// EUC-KR and EUC-CN. Non-validating, as [`euc_jp_len`].
 fn euc_kr_len(p: &[u8]) -> usize {
     match p[0] {
         0xa1..=0xfe if p.len() >= 2 => 2,

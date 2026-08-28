@@ -112,6 +112,11 @@ pub struct Engine<'a> {
     captures: Caps,
     option_stack: Vec<Options>,
     keep: usize,
+    /// FIND_LONGEST: keep searching past a match and remember the longest.
+    longest: bool,
+    longest_end: Option<usize>,
+    longest_caps: Option<Caps>,
+    longest_keep: usize,
     search_origin: usize,
     hay_start: usize,
     hay_end: usize,
@@ -173,7 +178,7 @@ pub fn search(
         && !options.contains(Options::FIND_NOT_EMPTY)
         && !options.contains(Options::MATCH_WHOLE_STRING)
         && !options.contains(Options::IGNORECASE)
-        && enc.min_len() == 1;
+        && enc.self_sync();
     if plain {
         if let Some(lit) = prog.ascii_literal.as_deref() {
             return search_ascii_literal(hay, pos, end, lit, prog, param);
@@ -187,7 +192,7 @@ pub fn search(
     eng.bol_guaranteed = prog.anchored_bol
         && !options.contains(Options::NOTBOL)
         && !whole
-        && enc.min_len() == 1;
+        && enc.self_sync();
     // `pos == end` is a legal start position, so a scan looking for candidate
     // STARTS must be able to reach it -- bounding at `end` made every filter
     // stop one position early. A match may also run past `end`, so anything
@@ -200,13 +205,13 @@ pub fn search(
     // Required-literal filter: a byte sequence every match must contain.
     // `req_q` caches the last occurrence found so the scan stays linear across
     // the whole search rather than restarting at every start position.
-    let req = if whole || enc.min_len() != 1 {
+    let req = if whole || !enc.self_sync() {
         None
     } else {
         prog.req_lit.as_ref()
     };
     let mut req_q: Option<usize> = None;
-    let bol_only = prog.anchored_bol && !whole && enc.min_len() == 1;
+    let bol_only = prog.anchored_bol && !whole && enc.self_sync();
     // A `^`-anchored pattern whose required literal sits at the match start:
     // the candidate set is "line start followed by that literal", which one
     // fused loop settles without also running the generic literal scan.
@@ -299,7 +304,7 @@ pub fn search(
         // line-start path already matched the required literal here, the first
         // byte is known good and this test is dead work.
         if let (None, Some(ref lead)) = (bol_lit, lead) {
-            if !whole && enc.min_len() == 1 && pos < hay.len() && !lead.contains(hay[pos]) {
+            if !whole && enc.self_sync() && pos < hay.len() && !lead.contains(hay[pos]) {
                 if pos >= scan_end {
                     break;
                 }
@@ -429,6 +434,10 @@ impl<'a> Engine<'a> {
             param,
             user_props,
             captures: Caps::new(prog.capture_count * 2),
+            longest: options.contains(Options::FIND_LONGEST),
+            longest_end: None,
+            longest_caps: None,
+            longest_keep: 0,
             option_stack: Vec::new(),
             keep: 0,
             search_origin,
@@ -475,7 +484,25 @@ impl<'a> Engine<'a> {
 
     fn attempt(&mut self, at: usize) -> Result<Option<Region>, Error> {
         self.reset_at(at);
+        self.longest_end = None;
+        self.longest_caps = None;
         let ok = self.run(0, at)?;
+        let ok = if self.longest {
+            // The run above always reports failure in longest mode; the result
+            // is whatever it recorded on the way through.
+            match self.longest_end.take() {
+                Some(end) => {
+                    if let Some(c) = self.longest_caps.take() {
+                        self.captures = c;
+                    }
+                    self.keep = self.longest_keep;
+                    Some(end)
+                }
+                None => None,
+            }
+        } else {
+            ok
+        };
         match ok {
             Some(end) => {
                 if self.captures.len() > 1 {
@@ -828,7 +855,7 @@ pub(crate) fn analyze(
     prog.class_plans = plans;
 
     let mut lits: Vec<Option<Vec<u8>>> = alloc::vec![None; n];
-    if enc.min_len() == 1 {
+    if enc.self_sync() {
         for pc in 0..n {
             if let Inst::Literal(v) = &prog.insts[pc] {
                 if v.iter().all(|c| *c <= 0x7F) {
@@ -857,7 +884,7 @@ pub(crate) fn analyze(
     }
     prog.repeat_shapes = shapes;
 
-    prog.req_lit = super::optimize::required_literal(prog, enc.min_len() == 1, options);
+    prog.req_lit = super::optimize::required_literal(prog, enc.self_sync(), options);
     prog.anchored_bol = starts_with_bol(prog);
 }
 
@@ -1021,8 +1048,9 @@ pub(crate) fn compute_lead(
     options: Options,
     user_props: &[unicode::UserProperty],
 ) -> Option<Lead> {
-    // A sub-byte-aligned encoding cannot be byte-scanned at all.
-    if enc.min_len() != 1 {
+    // An encoding a byte scan cannot resynchronise in -- UTF-16/32, and the
+    // CJK encodings whose trail bytes overlap ASCII -- has no usable lead set.
+    if !enc.self_sync() {
         return None;
     }
     let mut lead = Lead::empty();
@@ -1280,7 +1308,24 @@ impl<'a> Engine<'a> {
             };
             match inst {
                 Inst::Nop => pc += 1,
-                Inst::Match => return Ok(Some(pos)),
+                Inst::Match => {
+                    // FIND_LONGEST wants the longest match at this start, not
+                    // the first one the backtracker reaches -- `a|aa` on "aaa"
+                    // is `aa`. Record it and report failure so the search
+                    // keeps exploring; `attempt` restores the winner.
+                    //
+                    // Only at the top level: a lookaround or atomic group runs
+                    // with a `stop` pc and must still short-circuit normally.
+                    if self.longest && stop.is_none() {
+                        if self.longest_end.is_none_or(|e| pos > e) {
+                            self.longest_end = Some(pos);
+                            self.longest_caps = Some(self.captures.clone());
+                            self.longest_keep = self.keep;
+                        }
+                        return Ok(None);
+                    }
+                    return Ok(Some(pos));
+                }
                 Inst::Fail => return Ok(None),
                 Inst::Char(c) => match self.consume_char(pos, *c)? {
                     Some(n) => {

@@ -21,6 +21,27 @@
 //!
 //! Offsets are byte offsets into the haystack, exactly as Oniguruma's
 //! `OnigRegion` reports them.
+//!
+//! ## Known differences from libonig
+//!
+//! `tools/onig-bench --example oracle_audit` runs every pattern against live
+//! `libonig` across 17 encodings, 11 syntax dialects and the option matrix --
+//! 68,450 checks. Twelve differ, all one case, and it is written down here
+//! rather than rounded off:
+//!
+//! In the EUC encodings, on input that is **not valid** in that encoding,
+//! libonig can report a match starting inside a character. Its character walk
+//! treats `AD 61` in EUC-JP as one two-byte character -- `..` spans it and
+//! `[a-z]+` finds nothing in it -- but its literal byte-scan finds the `61`
+//! and its `left_adjust_char_head` accepts that offset as a character head, so
+//! a bare `a` matches there. We do not reproduce that: which patterns take
+//! that path depends on libonig's internal optimiser, and reporting a match
+//! that begins mid-character is the worse of the two answers. On well-formed
+//! input the two agree everywhere.
+//!
+//! Everything else the audit covers agrees exactly, including all 11 syntax
+//! dialects, all 17 encodings on well-formed input, and 60,000 randomised
+//! UTF-8 cases.
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -50,6 +71,8 @@ mod callout;
 mod compile;
 pub mod count;
 mod encoding;
+mod enc_ctype;
+mod enc_mbclen;
 mod encoding_cjk;
 mod error;
 mod exec;

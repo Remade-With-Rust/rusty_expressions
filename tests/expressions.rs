@@ -673,3 +673,111 @@ fn deferred_gaps_are_named() {
         "named Oniguruma gaps must be closed; leftover {lines:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Oracle-swap regressions
+//
+// Each of these was a difference against live libonig found by
+// `tools/onig-bench --example oracle_audit`, which took the audit from 189
+// differences to 12. They are pinned here so the fix survives without a C
+// library to compare against: the audit only runs where libonig builds, these
+// run everywhere.
+// ---------------------------------------------------------------------------
+
+/// POSIX BRE spells a group `\(...\)`; the bare parens are literals.
+///
+/// `ESC_LPAREN_SUBEXP` was in the flag tables but nothing in the parser ever
+/// read it, so `\(a\)` compiled to the literal text `(a)`.
+#[test]
+fn bre_escaped_parens_are_groups() {
+    for syn in [Syntax::posix_basic(), Syntax::grep(), Syntax::emacs()] {
+        let re = Regex::new_str(r"\(a\)", Options::NONE, syn).unwrap();
+        let m = re.search(b"ab").unwrap().expect("group matches 'a'");
+        assert_eq!(m.range(), 0..1);
+        assert_eq!(m.get(1), Some(0..1));
+    }
+    // ...and a bare paren stays a literal in the same dialect.
+    let re = Regex::new_str("(a)", Options::NONE, Syntax::posix_basic()).unwrap();
+    assert_eq!(re.search(b"(a)").unwrap().unwrap().range(), 0..3);
+}
+
+/// Where `?` is not the non-greedy marker it is a second quantifier.
+///
+/// POSIX ERE and Emacs read `a*?` as `(a*)?`. We used to leave the `?`
+/// unconsumed, so it fell through to `parse_atom` and became a literal `?` --
+/// making `a*?b` match only haystacks that contained one.
+#[test]
+fn stacked_quantifier_where_qmark_is_not_lazy() {
+    for syn in [Syntax::posix_extended(), Syntax::gnu_regex(), Syntax::emacs()] {
+        let re = Regex::new_str("a*?b", Options::NONE, syn).unwrap();
+        assert_eq!(re.search(b"aab").unwrap().expect("matches").range(), 0..3);
+        assert_eq!(re.search(b"ab").unwrap().expect("matches").range(), 0..2);
+    }
+    // Perl-family dialects still read it as a lazy star, not a stack.
+    let re = Regex::new_str("a*?b", Options::NONE, Syntax::perl()).unwrap();
+    assert_eq!(re.search(b"aab").unwrap().unwrap().range(), 0..3);
+}
+
+/// An undecodable UTF-8 byte is one character, and matches no character class.
+///
+/// Oniguruma does not refuse malformed input: `mbc_enc_len` reports 1 and
+/// `USE_INVALID_CODE_SCHEME` lifts the byte above every real codepoint. We
+/// used to error, returning no match where libonig returns one -- and then,
+/// after reporting the raw byte instead, called 0xA0 whitespace.
+#[test]
+fn invalid_utf8_byte_is_one_character() {
+    let dot = Regex::new_str(".", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    let m = dot.search(&[0x82, 0xa0, 0x61]).unwrap().expect("matches");
+    assert_eq!(m.range(), 0..1);
+
+    let two = Regex::new_str("..", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(two.search(&[0x82, 0xa0, 0x61]).unwrap().unwrap().range(), 0..2);
+
+    // 0xA0 is NOT whitespace: it never decoded to U+00A0 in the first place.
+    let sp = Regex::new_str(r"\s+", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(sp.search(&[0x82, 0xa0, 0x61]).unwrap(), None);
+}
+
+/// In a CJK encoding a non-ASCII character is a word character only if it is
+/// genuinely multi-byte.
+///
+/// Shift_JIS spells halfwidth katakana in ONE byte, and libonig does not call
+/// those word characters. Asking Unicode about the transcoded codepoint said
+/// otherwise, so `\w+` swallowed them.
+#[test]
+fn sjis_single_byte_katakana_is_not_a_word_char() {
+    let re = Regex::new(r"\w+", Options::NONE, Encoding::SJIS, Syntax::ONIGURUMA).unwrap();
+    // 0xB0 and 0xA1 are single-byte katakana; only the 'A' is a word char.
+    let m = re.search(&[0xb0, 0xa1, 0x41, 0xb0, 0xa2]).unwrap().expect("matches");
+    assert_eq!(m.range(), 2..3);
+    // A real two-byte character IS a word character.
+    let m = re.search(&[0xe4, 0xb8, 0xad, 0x61]).unwrap().expect("matches");
+    assert_eq!(m.range(), 0..2);
+}
+
+/// A prefilter must not report a match starting inside a character.
+///
+/// ASCII bytes appear as TRAIL bytes in the CJK encodings, so a byte scan for
+/// `a` finds the 0x61 in the Big5 character `AD 61` -- which is not the letter
+/// `a`. The filters are gated on `Encoding::self_sync` for exactly this.
+#[test]
+fn cjk_prefilters_do_not_match_inside_a_character() {
+    let re = Regex::new(b"a", Options::NONE, Encoding::BIG5, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(re.search(&[0xe4, 0xb8, 0xad, 0x61]).unwrap(), None);
+    // The same bytes in a single-byte encoding really do end in an 'a'.
+    let re = Regex::new(b"a", Options::NONE, Encoding::ISO_8859_1, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(re.search(&[0xe4, 0xb8, 0xad, 0x61]).unwrap().unwrap().range(), 3..4);
+}
+
+/// FIND_LONGEST takes the longest match at a start, not the first one found.
+///
+/// `Inst::Match` used to unwind immediately, so `a|aa` reported the first
+/// alternative and the option only ever compared across start positions.
+#[test]
+fn find_longest_picks_the_longest_alternative() {
+    let re = Regex::new_str("a|aa", Options::FIND_LONGEST, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(re.search(b"aaa").unwrap().expect("matches").range(), 0..2);
+    // Without the option it is leftmost-first, as before.
+    let re = Regex::new_str("a|aa", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    assert_eq!(re.search(b"aaa").unwrap().unwrap().range(), 0..1);
+}

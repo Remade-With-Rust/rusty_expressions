@@ -245,9 +245,19 @@ impl<'a> Parser<'a> {
             }
             match self.peek_byte() {
                 Some(b'|') if self.syntax.has_op(op::VBAR_ALT) => break,
-                Some(b')') => break,
+                // Only where a bare `(` opens a group. In POSIX BRE the
+                // parens are ordinary characters -- `\(` is the operator --
+                // so breaking here left a stray `)` for the caller to reject.
+                Some(b')') if self.syntax.has_op(op::LPAREN_SUBEXP) => break,
                 Some(b'\\') if self.syntax.has_op(op::ESC_VBAR_ALT)
                     && self.peek_code_at(1) == Some(u32::from(b'|')) =>
+                {
+                    break;
+                }
+                // POSIX BRE closes a group with `\\\\)`, so that ends the sequence
+                // too -- without this the group parser never sees its closer.
+                Some(b'\\') if self.syntax.has_op(op::ESC_LPAREN_SUBEXP)
+                    && self.peek_code_at(1) == Some(u32::from(b')')) =>
                 {
                     break;
                 }
@@ -276,13 +286,53 @@ impl<'a> Parser<'a> {
         } else {
             atom
         };
-        Ok(Node::Repeat {
+        let mut node = Node::Repeat {
             inner: Box::new(inner),
             min: if opt_exact { 0 } else { min },
             max: if opt_exact { Some(1) } else { max },
             greedy,
             possessive,
-        })
+        };
+
+        // Where `?` is not the non-greedy marker, a quantifier may stack on a
+        // quantifier: POSIX ERE and Emacs read `a*?` as `(a*)?`. Without this
+        // the orphan `?` fell through to `parse_atom` and became a literal, so
+        // `a*?b` only matched a haystack that actually contained a `?`.
+        //
+        // Gated on the marker rather than on CONTEXT_INDEP_REPEAT_OPS because
+        // Emacs wants the stacking without claiming that behaviour. Dialects
+        // that DO have non-greedy `?` never reach here with one pending --
+        // `try_quant` already ate it -- so `a**` keeps erroring there.
+        if !self.syntax.has_op(op::QMARK_NON_GREEDY) {
+            // Each stacked quantifier is a nesting level, so it counts against
+            // the depth limit -- `a**********...` must be refused, not compiled
+            // into a tower the matcher recurses through. Unwound at the end so
+            // the depth stays balanced for the rest of the parse.
+            let mut stacked = 0usize;
+            let r = loop {
+                match self.try_quant() {
+                    Err(e) => break Err(e),
+                    Ok(None) => break Ok(()),
+                    Ok(Some((min, max, greedy, possessive, _))) => {
+                        stacked += 1;
+                        self.depth += 1;
+                        if let Err(e) = self.check_depth() {
+                            break Err(e);
+                        }
+                        node = Node::Repeat {
+                            inner: Box::new(node),
+                            min,
+                            max,
+                            greedy,
+                            possessive,
+                        };
+                    }
+                }
+            };
+            self.depth -= stacked;
+            r?;
+        }
+        Ok(node)
     }
 
     fn try_quant(&mut self) -> Result<Option<(u32, Option<u32>, bool, bool, bool)>, Error> {
@@ -450,7 +500,16 @@ impl<'a> Parser<'a> {
                     });
                 }
                 b'[' if self.syntax.has_op(op::BRACKET_CC) => return self.parse_class(),
-                b'(' if self.syntax.has_op(op::LPAREN_SUBEXP) => return self.parse_group(),
+                b'(' if self.syntax.has_op(op::LPAREN_SUBEXP) => return self.parse_group(false),
+                // POSIX BRE, grep and Emacs spell a group `\\\\(...\)`: the bare parens
+                // are literals and the escaped ones are the operator. Step over
+                // the backslash and let the group parser take the `(`.
+                b'\\' if self.syntax.has_op(op::ESC_LPAREN_SUBEXP)
+                    && self.peek_code_at(1) == Some(u32::from(b'(')) =>
+                {
+                    self.i += 1;
+                    return self.parse_group(true);
+                }
                 b'\\' => return self.parse_escape(),
                 _ => {}
             }
@@ -459,7 +518,9 @@ impl<'a> Parser<'a> {
         Ok(Node::Char(c))
     }
 
-    fn parse_group(&mut self) -> Result<Node, Error> {
+    /// `esc` records that the group was opened as `\(`, so it must close
+    /// with `\)` rather than a bare `)`.
+    fn parse_group(&mut self, esc: bool) -> Result<Node, Error> {
         self.i += 1;
         if self.peek_byte() == Some(b'?') && self.syntax.has_op2(op2::QMARK_GROUP_EFFECT) {
             self.i += 1;
@@ -468,10 +529,15 @@ impl<'a> Parser<'a> {
         if self.peek_byte() == Some(b'*') && self.syntax.has_op2(op2::ASTERISK_CALLOUT_NAME) {
             return self.parse_named_callout();
         }
-        self.parse_capturing(None, false)
+        self.parse_capturing(None, false, esc)
     }
 
-    fn parse_capturing(&mut self, name: Option<String>, history: bool) -> Result<Node, Error> {
+    fn parse_capturing(
+        &mut self,
+        name: Option<String>,
+        history: bool,
+        esc: bool,
+    ) -> Result<Node, Error> {
         let capture_unnamed = !self.has_named || self.options.contains(Options::CAPTURE_GROUP);
         let dont = self.options.contains(Options::DONT_CAPTURE_GROUP);
         let capturing = if name.is_some() {
@@ -493,10 +559,19 @@ impl<'a> Parser<'a> {
             None
         };
         let inner = self.parse_alts()?;
-        if self.peek_byte() != Some(b')') {
-            return Err(self.err("unmatched parenthesis"));
+        if esc {
+            if self.peek_byte() != Some(b'\\')
+                || self.peek_code_at(1) != Some(u32::from(b')'))
+            {
+                return Err(self.err("unmatched parenthesis"));
+            }
+            self.i += 2;
+        } else {
+            if self.peek_byte() != Some(b')') {
+                return Err(self.err("unmatched parenthesis"));
+            }
+            self.i += 1;
         }
-        self.i += 1;
         Ok(match idx {
             Some(index) => Node::Capture {
                 index,
@@ -557,11 +632,11 @@ impl<'a> Parser<'a> {
             b'\'' if self.syntax.has_op2(op2::QMARK_LT_NAMED_GROUP) => {
                 self.i += 1;
                 let name = self.read_name(b'\'')?;
-                self.parse_capturing(Some(name), false)
+                self.parse_capturing(Some(name), false, false)
             }
             b'@' => {
                 self.i += 1;
-                self.parse_capturing(None, true)
+                self.parse_capturing(None, true, false)
             }
             b'P' if self.syntax.has_op2(op2::QMARK_CAPITAL_P_NAME) => self.parse_python_name(),
             b'{' if self.syntax.has_op2(op2::QMARK_BRACE_CALLOUT_CONTENTS) => {
@@ -599,7 +674,7 @@ impl<'a> Parser<'a> {
             }
             _ if self.syntax.has_op2(op2::QMARK_LT_NAMED_GROUP) => {
                 let name = self.read_name(b'>')?;
-                self.parse_capturing(Some(name), false)
+                self.parse_capturing(Some(name), false, false)
             }
             _ => Err(self.err("invalid group")),
         }
@@ -611,7 +686,7 @@ impl<'a> Parser<'a> {
             Some(b'<') => {
                 self.i += 1;
                 let name = self.read_name(b'>')?;
-                self.parse_capturing(Some(name), false)
+                self.parse_capturing(Some(name), false, false)
             }
             Some(b'=') => {
                 self.i += 1;
@@ -1202,12 +1277,18 @@ impl<'a> Parser<'a> {
         let mut first = true;
         while self.peek_code().is_some() && (first || self.peek_byte() != Some(end)) {
             first = false;
+            // `[:alpha:]` is gated by POSIX_BRACKET alone. It used to sit
+            // inside the CCLASS_SET_OP branch, which conflates it with nested
+            // `[...]` classes -- so a dialect that allows POSIX brackets but
+            // not class nesting (Perl) silently rejected them.
+            if self.peek_byte() == Some(b'[')
+                && self.peek_code_at(1) == Some(u32::from(b':'))
+                && self.syntax.has_op(op::POSIX_BRACKET)
+            {
+                items.push(self.parse_posix()?);
+                continue;
+            }
             if self.peek_byte() == Some(b'[') && self.syntax.has_op2(op2::CCLASS_SET_OP) {
-                if self.peek_code_at(1) == Some(u32::from(b':')) && self.syntax.has_op(op::POSIX_BRACKET)
-                {
-                    items.push(self.parse_posix()?);
-                    continue;
-                }
                 self.i += 1;
                 let mut nested = CharClass::empty();
                 if self.peek_byte() == Some(b'^') {

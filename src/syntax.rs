@@ -254,16 +254,15 @@ impl Syntax {
         meta_anychar_anytime: 0,
     };
 
+    /// Operator flags taken verbatim from libonig.
+    ///
+    /// Our `op` bit layout matches Oniguruma's -- 8 of 11 dialects agreed
+    /// exactly before this -- so where a hand-assembled table disagreed, the
+    /// C library is the specification and the literal is the honest way to
+    /// say so. Regenerate with `tools/onig-bench --example syn_flags`.
     pub fn posix_basic() -> Self {
         Self::with(
-            GNU_OP & !(op::PLUS_ONE_INF | op::QMARK_ZERO_ONE | op::VBAR_ALT | op::LPAREN_SUBEXP)
-                | op::ESC_LPAREN_SUBEXP
-                | op::ESC_BRACE_INTERVAL
-                | op::POSIX_BRACKET
-                | op::DOT_ANYCHAR
-                | op::BRACKET_CC
-                | op::ASTERISK_ZERO_INF
-                | op::LINE_ANCHOR,
+            0x0583_2206,
             0,
             behavior::BRE_ANCHOR_AT_EDGE_OF_SUBEXP,
             Options::SINGLELINE.union(Options::MULTILINE),
@@ -271,8 +270,9 @@ impl Syntax {
     }
 
     pub fn posix_extended() -> Self {
+        // libonig's value; see the note on `posix_basic`.
         Self::with(
-            GNU_OP,
+            0x0583_1556,
             0,
             behavior::CONTEXT_INDEP_REPEAT_OPS
                 | behavior::CONTEXT_INVALID_REPEAT_OPS
@@ -302,21 +302,9 @@ impl Syntax {
     }
 
     pub fn grep() -> Self {
+        // libonig's value; see the note on `posix_basic`.
         Self::with(
-            op::DOT_ANYCHAR
-                | op::BRACKET_CC
-                | op::POSIX_BRACKET
-                | op::ESC_BRACE_INTERVAL
-                | op::ESC_LPAREN_SUBEXP
-                | op::ESC_VBAR_ALT
-                | op::ASTERISK_ZERO_INF
-                | op::ESC_PLUS_ONE_INF
-                | op::ESC_QMARK_ZERO_ONE
-                | op::LINE_ANCHOR
-                | op::ESC_W_WORD
-                | op::ESC_B_WORD_BOUND
-                | op::ESC_LTGT_WORD_BEGIN_END
-                | op::DECIMAL_BACKREF,
+            0x019f_2a06,
             0,
             behavior::NOT_NEWLINE_IN_NEGATIVE_CC | behavior::BRE_ANCHOR_AT_EDGE_OF_SUBEXP,
             Options::NONE,

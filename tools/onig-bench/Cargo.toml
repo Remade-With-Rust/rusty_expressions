@@ -9,7 +9,7 @@ description = "Dev-only rusty_expressions vs Oniguruma harness. Not a dependency
 default = ["rusty-alloc"]
 # Links crates.io `onig` (libonig via onig_sys). Needs a C toolchain. Never
 # enable this on the shipping thoth crate.
-oracle = ["dep:onig"]
+oracle = ["dep:onig", "dep:onig_sys"]
 # Deterministic VM work counters.
 count = ["rusty_expressions/expr-count"]
 # Install rusty_alloc as the global allocator, as a deliverable would.
@@ -19,3 +19,5 @@ rusty-alloc = ["rusty_expressions/rusty-alloc"]
 [dependencies]
 rusty_expressions = { path = "../..", default-features = false }
 onig = { version = "6.4.0", optional = true, default-features = false }
+# Raw encoding statics (OnigEncodingSJIS etc.) for the encoding oracle.
+onig_sys = { version = "69", optional = true }

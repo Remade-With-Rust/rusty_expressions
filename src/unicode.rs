@@ -86,34 +86,121 @@ pub fn is_gc(cp: u32, letter: u8) -> bool {
     ucd16::gc_name(ucd16::gc(cp)).as_bytes().first().copied() == Some(letter)
 }
 
+/// Character class for a byte in a non-Unicode single-byte encoding.
+///
+/// Those encodings decode a byte to itself, not to a Unicode codepoint, so a
+/// Unicode property lookup would be answering about the wrong character: byte
+/// 0xC0 is `A-grave` in Latin-1 but Cyrillic `A` in CP1251. Oniguruma carries
+/// per-encoding tables and, as its remake, so do we -- see `enc_ctype.rs`,
+/// generated from libonig.
+///
+/// `None` means the caller should use its normal path -- the byte is ASCII, so
+/// the ASCII rules apply and the encoding does not come into it.
+fn enc_class(enc: Encoding, cp: u32, bit: u16) -> Option<bool> {
+    if enc.is_unicode() || cp <= 0x7f {
+        return None;
+    }
+    let Some(t) = super::enc_ctype::table(enc.name()) else {
+        // A multi-byte (CJK) encoding. Oniguruma's `onigenc_mb2_is_code_ctype`
+        // answers these without a table: a non-ASCII character is word, graph
+        // and print if it is genuinely multi-byte, and is nothing else -- not
+        // space, not alpha, not digit. We previously transcoded to Unicode and
+        // asked Unicode, which disagrees: byte 0xA0 in Shift_JIS became U+00A0
+        // and so counted as whitespace, making `\s+` match where libonig
+        // matches nothing.
+        //
+        // The length test is load-bearing, not decoration. Shift_JIS spells
+        // halfwidth katakana in one byte, and libonig does NOT call those word
+        // characters; without the test `\w+` swallowed them.
+        const MB_TRUE: u16 = super::enc_ctype::WORD
+            | super::enc_ctype::GRAPH
+            | super::enc_ctype::PRINT;
+        return Some(bit & MB_TRUE != 0 && enc.code_mbc_len(cp) > 1);
+    };
+    if cp > 0xff {
+        // A single-byte encoding cannot produce this; treat as no match.
+        return Some(false);
+    }
+    Some(t[(cp - 0x80) as usize] & bit != 0)
+}
+
 pub fn is_word(enc: Encoding, opt: Options, cp: u32) -> bool {
-    if opt.contains(Options::WORD_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) || !enc.is_unicode()
-    {
-        if !enc.is_unicode() && cp > 0x7f {
-            return true;
-        }
+    if opt.contains(Options::WORD_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) {
         return is_ascii_word(cp);
+    }
+    if let Some(hit) = enc_class(enc, cp, super::enc_ctype::WORD) {
+        return hit;
+    }
+    if !enc.is_unicode() {
+        // CJK: the decode above produced a Unicode codepoint.
+        return if cp <= 0x7f {
+            is_ascii_word(cp)
+        } else {
+            is_unicode_word(cp)
+        };
     }
     is_unicode_word(cp)
 }
 
 pub fn is_digit(enc: Encoding, opt: Options, cp: u32) -> bool {
-    if opt.contains(Options::DIGIT_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) || !enc.is_unicode()
-    {
+    if opt.contains(Options::DIGIT_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) {
         return is_ascii_digit(cp);
+    }
+    if let Some(hit) = enc_class(enc, cp, super::enc_ctype::DIGIT) {
+        return hit;
+    }
+    if !enc.is_unicode() {
+        return if cp <= 0x7f {
+            is_ascii_digit(cp)
+        } else {
+            is_decimal_number(cp)
+        };
     }
     is_decimal_number(cp)
 }
 
 pub fn is_space(enc: Encoding, opt: Options, cp: u32) -> bool {
-    if opt.contains(Options::SPACE_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) || !enc.is_unicode()
-    {
+    if opt.contains(Options::SPACE_IS_ASCII) || opt.contains(Options::POSIX_IS_ASCII) {
         return is_ascii_space(cp);
+    }
+    if let Some(hit) = enc_class(enc, cp, super::enc_ctype::SPACE) {
+        return hit;
+    }
+    if !enc.is_unicode() {
+        return if cp <= 0x7f {
+            is_ascii_space(cp)
+        } else {
+            is_unicode_space(cp)
+        };
     }
     is_unicode_space(cp)
 }
 
 pub fn posix(name: &str, enc: Encoding, opt: Options, cp: u32) -> bool {
+    // A non-Unicode single-byte encoding answers from its own table, for the
+    // same reason `is_word` does: the byte is not a Unicode codepoint.
+    if !opt.contains(Options::POSIX_IS_ASCII) {
+        let bit = match name {
+            "alpha" => Some(super::enc_ctype::ALPHA),
+            "alnum" => Some(super::enc_ctype::ALNUM),
+            "upper" => Some(super::enc_ctype::UPPER),
+            "lower" => Some(super::enc_ctype::LOWER),
+            "punct" => Some(super::enc_ctype::PUNCT),
+            "print" => Some(super::enc_ctype::PRINT),
+            "graph" => Some(super::enc_ctype::GRAPH),
+            "cntrl" => Some(super::enc_ctype::CNTRL),
+            "xdigit" => Some(super::enc_ctype::XDIGIT),
+            "space" => Some(super::enc_ctype::SPACE),
+            "digit" => Some(super::enc_ctype::DIGIT),
+            "word" => Some(super::enc_ctype::WORD),
+            _ => None,
+        };
+        if let Some(bit) = bit {
+            if let Some(hit) = enc_class(enc, cp, bit) {
+                return hit;
+            }
+        }
+    }
     let ascii = opt.contains(Options::POSIX_IS_ASCII) || !enc.is_unicode();
     match name {
         "alnum" => {
