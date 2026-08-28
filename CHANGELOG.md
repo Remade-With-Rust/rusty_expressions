@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.0...v0.2.1) - 2026-08-28
+
+### Other
+
+- add release-plz so merged dependency bumps actually reach crates.io ([#2](https://github.com/Remade-With-Rust/rusty_expressions/pull/2))
+
 ## 0.2.0
 
 The test oracle moved from a harvested corpus to **live libonig**, compared
