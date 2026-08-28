@@ -28,6 +28,10 @@ pub enum Node {
     },
     Capture {
         index: usize,
+        /// Set at construction; the compiler reads names from
+        /// `ParseResult::names` instead. Kept so the node is self-describing
+        /// when dumping an AST.
+        #[allow(dead_code)]
         name: Option<String>,
         inner: Box<Node>,
         history: bool,
@@ -86,6 +90,10 @@ pub enum Cond {
     Group(usize),
     Name(String),
     Expr(Box<Node>),
+    /// Oniguruma's "is this backreference valid" test. The parser folds it
+    /// into `Group`, which carries the same information, so nothing builds
+    /// this today; the variant names the concept the exec arm implements.
+    #[allow(dead_code)]
     ValidRef(Backref),
     /// Compiled look-around used as a conditional test (does not consume).
     Look { body: u16, after: u16 },

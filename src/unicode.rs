@@ -6,6 +6,11 @@ use super::encoding::Encoding;
 use super::syntax::Options;
 use super::ucd16;
 
+/// The POSIX character classes, as Oniguruma names them.
+///
+/// The class tests dispatch on `enc_ctype` bit constants rather than on this
+/// enum; it is the readable vocabulary for the same set.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ctype {
     Word,

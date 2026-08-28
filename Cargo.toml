@@ -1,8 +1,16 @@
 [package]
 name = "rusty_expressions"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
-rust-version = "1.73"
+# The DEFAULT build's floor, which is what `cargo add rusty_expressions` gets:
+# the `rusty-alloc` default feature pulls in `rusty_alloc-api`, which is
+# edition 2024 and so needs 1.85. Cargo has one rust-version per package and
+# enforces it on consumers, so it has to describe the default.
+#
+# The engine itself is far more conservative: `default-features = false`,
+# with or without `compat`, builds on 1.73. Verified against that toolchain,
+# not assumed.
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/Remade-With-Rust/rusty_expressions"
 homepage = "https://www.mata.network/"

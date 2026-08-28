@@ -19,6 +19,10 @@ pub struct ParseResult {
     pub capture_count: usize,
     pub names: Vec<Option<String>>,
     pub has_named: bool,
+    /// Inline options the pattern set, e.g. a leading `(?i)`. The compiler
+    /// takes these from the AST nodes that carry them; reported here so a
+    /// caller can inspect what the pattern asked for.
+    #[allow(dead_code)]
     pub options: Options,
 }
 
@@ -127,6 +131,9 @@ struct Parser<'a> {
     names: Vec<Option<String>>,
     has_named: bool,
     depth: usize,
+    /// Open capture indices. Maintained for nested-group diagnostics; the
+    /// depth limit is enforced through `depth`.
+    #[allow(dead_code)]
     group_stack: Vec<usize>,
 }
 

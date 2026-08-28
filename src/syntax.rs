@@ -149,6 +149,8 @@ pub mod behavior {
     pub const ALLOW_UNMATCHED_CLOSE_SUBEXP: u32 = 1 << 2;
     pub const ALLOW_INVALID_INTERVAL: u32 = 1 << 3;
     pub const ALLOW_INTERVAL_LOW_ABBREV: u32 = 1 << 4;
+    /// Part of Oniguruma's behaviour vocabulary; no dialect we ship sets it.
+    #[allow(dead_code)]
     pub const STRICT_CHECK_BACKREF: u32 = 1 << 5;
     pub const DIFFERENT_LEN_ALT_LOOK_BEHIND: u32 = 1 << 6;
     pub const CAPTURE_ONLY_NAMED_GROUP: u32 = 1 << 7;
@@ -162,6 +164,8 @@ pub mod behavior {
     pub const ESC_P_WITH_ONE_CHAR_PROP: u32 = 1 << 15;
     pub const NOT_NEWLINE_IN_NEGATIVE_CC: u32 = 1 << 20;
     pub const BACKSLASH_ESCAPE_IN_CC: u32 = 1 << 21;
+    /// Part of Oniguruma's behaviour vocabulary; no dialect we ship sets it.
+    #[allow(dead_code)]
     pub const ALLOW_EMPTY_RANGE_IN_CC: u32 = 1 << 22;
     pub const ALLOW_DOUBLE_RANGE_OP_IN_CC: u32 = 1 << 23;
     pub const ALLOW_CHAR_TYPE_FOLLOWED_BY_MINUS_IN_CC: u32 = 1 << 27;
@@ -477,6 +481,10 @@ pub fn sql_syntax() -> Syntax {
 }
 
 /// True when this encoding treats POSIX/Unicode word tests as Unicode.
+///
+/// The engine asks `unicode::is_word`, which makes this decision inline with
+/// the per-encoding tables. Kept as the readable statement of the rule.
+#[allow(dead_code)]
 pub fn unicode_word(enc: Encoding, opt: Options) -> bool {
     enc.is_unicode() && !opt.contains(Options::WORD_IS_ASCII) && !opt.contains(Options::POSIX_IS_ASCII)
 }

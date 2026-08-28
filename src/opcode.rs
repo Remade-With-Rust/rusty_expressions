@@ -21,6 +21,10 @@ pub enum Inst {
     Jump(u16),
     Save(u16),
     Match,
+    /// Unconditional failure. Part of the instruction set and handled by the
+    /// VM, but the compiler currently reaches the same effect through an
+    /// assert that can never hold, so nothing emits it.
+    #[allow(dead_code)]
     Fail,
     Assert(Anchor),
     Repeat {

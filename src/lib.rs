@@ -97,7 +97,7 @@ mod unicode;
 #[cfg_attr(docsrs, doc(cfg(feature = "compat")))]
 pub mod compat;
 
-pub use callout::{CalloutCtx, CalloutDir, CalloutFn, CalloutResult};
+pub use callout::{builtin_skip, describe, CalloutCtx, CalloutDir, CalloutFn, CalloutResult};
 pub use encoding::Encoding;
 pub use error::{Error, ErrorKind};
 pub use ops::{find_all, find_all_str, format_matches, is_match_str};

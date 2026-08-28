@@ -143,18 +143,39 @@ unsafe fn fill_region(dst: *mut OnigRegion, m: &Region) {
 }
 
 /// No-op (`onig_initialize`). Encodings are values, not process-global tables.
+///
+/// # Safety
+///
+/// Both arguments are ignored, so any values are accepted. Kept so C callers
+/// written against Oniguruma link and run unchanged.
 #[no_mangle]
 pub unsafe extern "C" fn onig_initialize(_encodings: *mut c_uint, _n: c_int) -> c_int {
     ONIG_NORMAL
 }
 
 /// No-op (`onig_end`).
+///
+/// # Safety
+///
+/// Takes no arguments and touches no state; always safe to call, in any order,
+/// any number of times.
 #[no_mangle]
 pub unsafe extern "C" fn onig_end() -> c_int {
     ONIG_NORMAL
 }
 
 /// Compile a pattern into a heap `regex_t` (`Box<Regex>`).
+///
+/// # Safety
+///
+/// `reg` must be a valid, writable `*mut *mut Regex`; a null one is rejected
+/// rather than written through. `pattern` and `pattern_end` must bound the
+/// same allocation with `pattern <= pattern_end` -- a reversed or foreign pair
+/// is rejected, not read. `einfo` may be null; when it is not, it must be
+/// writable for one `OnigErrorInfo`.
+///
+/// On success `*reg` owns a regex that must be released with [`onig_free`]
+/// exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn onig_new(
     reg: *mut *mut Regex,
@@ -188,6 +209,12 @@ pub unsafe extern "C" fn onig_new(
 }
 
 /// Free a regex from `onig_new`.
+///
+/// # Safety
+///
+/// `reg` must be null, or a pointer returned by [`onig_new`] that has not yet
+/// been freed. Freeing null is a no-op, as in Oniguruma. Freeing the same
+/// pointer twice is undefined behaviour.
 #[no_mangle]
 pub unsafe extern "C" fn onig_free(reg: *mut Regex) {
     if !reg.is_null() {
@@ -196,6 +223,16 @@ pub unsafe extern "C" fn onig_free(reg: *mut Regex) {
 }
 
 /// Search (`onig_search`). Returns match start offset, `ONIG_MISMATCH`, or an error.
+///
+/// # Safety
+///
+/// `reg` must be null or a live regex from [`onig_new`]; null is rejected.
+/// `str` and `end` must bound one allocation. `start` and `range` must be null
+/// or point into that same allocation -- offsets outside the haystack are
+/// rejected with `ONIGERR_INVALID_ARGUMENT`, but the pointers themselves must
+/// still be derived from it. `region` may be null; when it is not, it must be
+/// a live `OnigRegion` from [`onig_region_new`], whose previous contents this
+/// call frees before writing.
 #[no_mangle]
 pub unsafe extern "C" fn onig_search(
     reg: *const Regex,
@@ -236,6 +273,12 @@ pub unsafe extern "C" fn onig_search(
 }
 
 /// Match only at `at` (`onig_match`).
+///
+/// # Safety
+///
+/// As [`onig_search`], with `at` in place of `start`/`range`. An `at` past the
+/// end of the haystack is rejected rather than answered: it used to report an
+/// empty match at that offset, which a caller would then have sliced with.
 #[no_mangle]
 pub unsafe extern "C" fn onig_match(
     reg: *const Regex,
@@ -269,6 +312,12 @@ pub unsafe extern "C" fn onig_match(
     }
 }
 
+/// Allocate an empty region (`onig_region_new`).
+///
+/// # Safety
+///
+/// Takes no arguments and is always safe to call. The result must be released
+/// with [`onig_region_free`] exactly once.
 #[no_mangle]
 pub unsafe extern "C" fn onig_region_new() -> *mut OnigRegion {
     Box::into_raw(Box::new(OnigRegion {
@@ -279,6 +328,14 @@ pub unsafe extern "C" fn onig_region_new() -> *mut OnigRegion {
     }))
 }
 
+/// Release a region's capture arrays, and optionally the region (`onig_region_free`).
+///
+/// # Safety
+///
+/// `region` must be null or a live region from [`onig_region_new`]. With
+/// `free_self` non-zero the region itself is freed and must not be used again.
+/// The capture arrays must be ones this library allocated: a region whose
+/// `beg`/`end` were set by the caller must not be passed here.
 #[no_mangle]
 pub unsafe extern "C" fn onig_region_free(region: *mut OnigRegion, free_self: c_int) {
     if region.is_null() {
@@ -290,6 +347,13 @@ pub unsafe extern "C" fn onig_region_free(region: *mut OnigRegion, free_self: c_
     }
 }
 
+/// Drop a region's captures, leaving it reusable (`onig_region_clear`).
+///
+/// # Safety
+///
+/// `region` must be null or a live region from [`onig_region_new`], with
+/// capture arrays this library allocated. Clearing an already-cleared region
+/// is a no-op, so repeated calls are safe.
 #[no_mangle]
 pub unsafe extern "C" fn onig_region_clear(region: *mut OnigRegion) {
     if region.is_null() {

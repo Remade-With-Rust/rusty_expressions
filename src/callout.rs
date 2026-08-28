@@ -39,9 +39,12 @@ pub struct CalloutCtx<'a> {
 /// `fn` pointer: `Send + Sync`, no capture. Closures belong in a match-time wrapper.
 pub type CalloutFn = fn(&CalloutCtx<'_>) -> CalloutResult;
 
-/// Built-in `(*COUNT)` state: increment a counter the caller owns via args parse.
-/// The engine treats `(*COUNT)` as Success and records nothing unless a named
-/// callout hook is installed. `(*SKIP)` is implemented in exec.
+/// A ready-made hook that always asks the engine to skip.
+///
+/// Install as a `MatchParam` callout when you want every callout site to
+/// behave as `(*SKIP)` without writing the closure yourself. The engine treats
+/// `(*COUNT)` as Success and records nothing unless a named hook is installed;
+/// `(*SKIP)` itself is implemented in exec, not here.
 pub fn builtin_skip(_ctx: &CalloutCtx<'_>) -> CalloutResult {
     CalloutResult::Skip
 }

@@ -49,8 +49,17 @@ impl RegSet {
         Ok(())
     }
 
+    /// How many patterns are in the set.
     pub fn len(&self) -> usize {
         self.regs.len()
+    }
+
+    /// True when the set holds no patterns.
+    ///
+    /// A `RegSet` with a public `len` and no `is_empty` is a Rust API that
+    /// reads wrong at every call site; searching an empty set matches nothing.
+    pub fn is_empty(&self) -> bool {
+        self.regs.is_empty()
     }
 
     pub fn get(&self, i: usize) -> Option<&Regex> {

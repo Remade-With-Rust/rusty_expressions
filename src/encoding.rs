@@ -177,11 +177,13 @@ impl Encoding {
                 }
                 4
             }
-            EncKind::Sjis => sjis_len(p),
-            EncKind::Big5 => big5_len(p),
+            EncKind::Sjis => table_len(&super::enc_mbclen::LEN_SJIS, p),
+            EncKind::Big5 => table_len(&super::enc_mbclen::LEN_BIG5, p),
             EncKind::Gb18030 => gb18030_len(p)?,
-            EncKind::EucJp | EncKind::EucTw => euc_jp_len(p),
-            EncKind::EucKr | EncKind::EucCn => euc_kr_len(p),
+            EncKind::EucJp => table_len(&super::enc_mbclen::LEN_EUC_JP, p),
+            EncKind::EucTw => table_len(&super::enc_mbclen::LEN_EUC_TW, p),
+            EncKind::EucKr => table_len(&super::enc_mbclen::LEN_EUC_KR, p),
+            EncKind::EucCn => table_len(&super::enc_mbclen::LEN_EUC_CN, p),
         };
         if n > p.len() {
             return Err(enc_err("truncated character"));
@@ -451,17 +453,23 @@ fn code_to_utf16(code: u32, out: &mut [u8], be: bool) -> Result<usize, Error> {
     }
 }
 
-fn sjis_len(p: &[u8]) -> usize {
-    match p[0] {
-        0x81..=0x9f | 0xe0..=0xfc if p.len() >= 2 => 2,
-        _ => 1,
-    }
-}
-
-fn big5_len(p: &[u8]) -> usize {
-    match p[0] {
-        0xa1..=0xfe if p.len() >= 2 && matches!(p[1], 0x40..=0x7e | 0xa1..=0xfe) => 2,
-        _ => 1,
+/// Character length from a generated lead-byte table.
+///
+/// The tables in `enc_mbclen.rs` are measured from libonig, which is the
+/// specification here. They replaced hand-written lead-byte ranges that were
+/// wrong in two ways: our Big5 validated the trail byte where libonig's does
+/// not, and EUC-TW shared EUC-JP's table, so its four-byte `0x8E` sequences
+/// were read as two bytes.
+///
+/// A character running off the end of the buffer counts as one byte, which is
+/// what Oniguruma's `enclen` does with a `NEEDMORE` result and what the
+/// previous `p.len() >= 2` guards did.
+fn table_len(t: &[u8; 256], p: &[u8]) -> usize {
+    let n = t[p[0] as usize] as usize;
+    if n > p.len() {
+        1
+    } else {
+        n
     }
 }
 
@@ -487,31 +495,10 @@ fn gb18030_len(p: &[u8]) -> Result<usize, Error> {
     }
 }
 
-/// EUC-JP and EUC-TW.
-///
-/// Deliberately does NOT validate the trail byte, because libonig's character
-/// walk does not either: `..` in EUC-JP spans the four bytes `E4 B8 AD 61` as
-/// two characters, and `[a-z]+` finds nothing in them. Adding validation made
-/// the walk disagree with libonig on seven cases to fix three.
-///
-/// The generated table in `enc_mbclen.rs` records the same lengths, measured
-/// from the C library.
-fn euc_jp_len(p: &[u8]) -> usize {
-    match p[0] {
-        0x8e if p.len() >= 2 => 2,
-        0x8f if p.len() >= 3 => 3,
-        0xa1..=0xfe if p.len() >= 2 => 2,
-        _ => 1,
-    }
-}
-
-/// EUC-KR and EUC-CN. Non-validating, as [`euc_jp_len`].
-fn euc_kr_len(p: &[u8]) -> usize {
-    match p[0] {
-        0xa1..=0xfe if p.len() >= 2 => 2,
-        _ => 1,
-    }
-}
+// Why these tables do not validate the trail byte: libonig's character walk
+// does not either. `..` in EUC-JP spans the four bytes `E4 B8 AD 61` as two
+// characters, and `[a-z]+` finds nothing in them. Adding validation fixed
+// three differences against libonig and introduced seven.
 
 fn pack_mbc(b: &[u8]) -> u32 {
     let mut v = 0u32;

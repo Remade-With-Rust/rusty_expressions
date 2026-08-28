@@ -181,16 +181,29 @@ agree everywhere.
   matches in ~13 ms rather than aborting.
 - Pattern **nesting depth** and **VM recursion depth** are bounded too, so a
   hostile pattern gets an `Err`, never a process abort.
+- Those limits are the difference between an error and a hang. `[a-z]+x`
+  against a megabyte of `abab…` is quadratic backtracking with no match to
+  find: we return `RetryLimitSearch` in **88 ms**, while libonig — which ships
+  no retry limit by default — ran for over **forty minutes** on the same input
+  before we killed it. Reproduce with `--example stress_repeat`; the libonig
+  arm is opt-in for exactly this reason.
 
 ## 📦 Install
 
 ```toml
 [dependencies]
-rusty_expressions = "0.1"
+rusty_expressions = "0.2"
 
 # A library that installs its own #[global_allocator]:
-# rusty_expressions = { version = "0.1", default-features = false }
+# rusty_expressions = { version = "0.2", default-features = false }
 ```
+
+**MSRV.** The package declares **1.85**, because the default `rusty-alloc`
+feature pulls in `rusty_alloc-api`, which is edition 2024. Cargo has one
+`rust-version` per package and enforces it on consumers, so it has to describe
+the default build. The engine itself is far more conservative: with
+`default-features = false`, with or without `compat`, it builds on **1.73** —
+checked against that toolchain, not assumed.
 
 ```rust
 use rusty_expressions::{Encoding, Options, Regex, Syntax};

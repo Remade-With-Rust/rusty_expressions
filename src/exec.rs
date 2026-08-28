@@ -1317,7 +1317,10 @@ impl<'a> Engine<'a> {
                     // Only at the top level: a lookaround or atomic group runs
                     // with a `stop` pc and must still short-circuit normally.
                     if self.longest && stop.is_none() {
-                        if self.longest_end.is_none_or(|e| pos > e) {
+                        // Clippy suggests `is_none_or`, which is 1.82; the
+                        // engine builds on 1.73 with default features off.
+                        #[allow(clippy::unnecessary_map_or)]
+                        if self.longest_end.map_or(true, |e| pos > e) {
                             self.longest_end = Some(pos);
                             self.longest_caps = Some(self.captures.clone());
                             self.longest_keep = self.keep;

@@ -1,5 +1,108 @@
 # Changelog
 
+## 0.2.0
+
+The test oracle moved from a harvested corpus to **live libonig**, compared
+across every encoding, syntax dialect and option we ship. That found 189
+differences. Twelve remain, all one documented case.
+
+A minor bump rather than a patch: several of these change what a pattern
+matches, and one turns a previously-returned match into an error.
+
+### Fixed -- matching
+
+- **POSIX BRE groups were unimplemented.** `ESC_LPAREN_SUBEXP` was in the flag
+  tables but nothing in the parser ever read it, so `\(a\)` compiled to the
+  literal text `(a)`. Bare parens are now literals in that dialect, as POSIX
+  says.
+- **`posix_basic`, `posix_extended` and `grep` had wrong operator flags.**
+  Replaced with libonig's own values.
+- **`a*?` was read as a literal `?`** in the dialects where `?` is not the
+  non-greedy marker. POSIX ERE and Emacs read it as `(a*)?`.
+- **CJK prefilters matched inside a character.** ASCII bytes appear as trail
+  bytes in the CJK encodings, so a byte scan for `a` matched the `61` in the
+  Big5 character `AD 61`. The lead set, ASCII literal and required literal are
+  now withheld unless the encoding is self-synchronising.
+- **`\w` in a CJK encoding asked Unicode about the transcoded codepoint.**
+  Oniguruma does not: a non-ASCII character is word/graph/print only if it is
+  genuinely multi-byte. Shift_JIS halfwidth katakana is one byte, and `0xA0`
+  was reading as U+00A0 and therefore as whitespace.
+- **Undecodable UTF-8 raised instead of scanning.** Oniguruma treats such a
+  byte as a one-byte character whose code sits above every real codepoint, so
+  it matches `.` and `[^a]` but no character class.
+- **`FIND_LONGEST` returned the first alternative, not the longest.** `a|aa`
+  on `"aaa"` now matches `aa`.
+
+### Fixed -- API
+
+- **`Regex::find_at` accepted a position past the end of the haystack** and
+  returned an empty match there, so `find_at(b"ab", 999)` reported `999..999`.
+  It now returns `InvalidArgument`, as `search_range_param` always has. Found
+  by the new C ABI fuzzer; a C caller would have sliced with those offsets.
+  **This is the behaviour change that makes this a minor bump.**
+
+### Added
+
+- `Encoding::self_sync` -- whether a byte scan can locate character boundaries
+  in this encoding.
+- `Encoding::code_mbc_len` -- Oniguruma's `ONIGENC_CODE_TO_MBCLEN`.
+- Per-encoding character-class and character-length tables, **generated from
+  libonig** rather than transcribed, and committed so a build never needs the
+  C library.
+
+### Gates
+
+- Oracle swap: 68 450 checks pairing our encodings, syntaxes and options with
+  libonig's own -- 12 differences, all one case, documented in the crate docs
+  and README.
+- Randomized soak: **5 000 000** generated cases against live libonig, **0**
+  differences (`ORACLE_SOAK=5000000`).
+- C ABI fuzz: 200 000 compiles and 280 000 searches through `onig_new` /
+  `onig_search` / `onig_match` with null pointers, reversed spans, offsets
+  past the end and regions reused and double-freed -- **0** violations.
+- Miri over the whole suite, C ABI included: **no undefined behaviour**.
+- wasm32 **executed**, not merely compiled: a no_std cdylib runs a battery
+  inside the sandbox under Node, 0 failures, no host imports.
+- Cross-builds clean for aarch64/x86_64 Linux (gnu and musl), aarch64 macOS
+  and Android.
+
+### Release hardening
+
+- **The declared MSRV was wrong.** `rust-version` said 1.73, but the default
+  `rusty-alloc` feature pulls in `rusty_alloc-api`, which is edition 2024 and
+  needs 1.85 -- so `cargo add rusty_expressions` on 1.73 failed with a
+  dependency parse error rather than a clear MSRV error. Now declares 1.85,
+  which is what the default build actually requires. The engine itself still
+  builds on 1.73 with `default-features = false`, checked against that
+  toolchain.
+- `callout::builtin_skip` and `callout::describe` were written as public API
+  with doc comments, but `callout` is a private module and only its types were
+  re-exported -- nothing outside the crate could reach them. Now exported.
+  `builtin_skip`'s doc described `(*COUNT)` while the function returns `Skip`.
+- `RegSet` had a public `len` and no `is_empty`.
+- Every `unsafe extern "C"` function in `compat` now documents its safety
+  contract. A C ABI whose callers must uphold pointer invariants should say
+  which ones.
+- Zero build warnings in every feature configuration; the remaining dead code
+  is annotated with why it is kept, so the next real one is visible.
+- The generated character-length tables are now what `mbc_len` actually reads.
+  They were generated, committed, and then left unused while hand-written
+  ranges did the work -- and those ranges were wrong twice over: Big5
+  validated a trail byte libonig does not, and EUC-TW shared EUC-JP's table,
+  so its four-byte `0x8E` sequences were read as two.
+
+### Documentation
+
+- **`no_std` was overclaimed.** `default = ["rusty-alloc"]` and `rusty_alloc`
+  depends on std, so the default build is not `no_std`. The claim now says it
+  holds with `default-features = false`.
+- The twelve known differences from libonig are written down rather than
+  rounded off.
+- `stress_repeat` no longer runs libonig on every case. `[a-z]+x` against a
+  megabyte is quadratic with no match to find: we return `RetryLimitSearch` in
+  88 ms, libonig ran over forty minutes before being killed. That arm is now
+  opt-in, and the gate fails if our own arm exceeds a five-second budget.
+
 ## 0.1.4
 
 - Depend on `rusty_alloc-api` 1.1.4 (was 0.4.0). Published so crates.io carries
