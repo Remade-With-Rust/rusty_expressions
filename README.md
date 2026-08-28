@@ -15,9 +15,11 @@
 > `wasm32-unknown-unknown` — executed there, not merely compiled.
 >
 > It is **match-equivalent to Oniguruma 6.9.10** — verified on a harvested
-> corpus and on **~180 000 differential and property cases** run against live
-> `libonig` — and **~3x faster than libonig on search**, winning all 23 cases
-> in the benchmark suite.
+> corpus and on **over 5 million differential cases** run against live
+> `libonig`, plus **~380 000 property and C-ABI fuzz checks** — and **~3x
+> faster than libonig on search**, winning all 23 cases in the benchmark
+> suite. The twelve known differences are
+> [written down](#known-differences-from-libonig), not rounded off.
 
 Part of **[Remade With Rust](https://github.com/Remade-With-Rust)** by
 **[Mata Network](https://www.mata.network/)**.
@@ -126,6 +128,11 @@ itself gates in its own bugs.
 | Constructs differential | 21 500 pairs over atomic / look-around / absent / conditional / subexp-call | **0** |
 | Context audit | 30 092 checks over 6 encodings, 6 option sets, 7 syntax dialects, user properties, capture spill, non-zero search starts | **0** |
 | API property fuzz | ~100 000 checks over `MatchParam` limits, `RegSet`, `scan`, `search_range_param` | **0** |
+| C ABI fuzz | 200 000 compiles and 280 000 searches through `onig_new`/`onig_search`/`onig_match` with null pointers, reversed spans, offsets past the end, and regions reused and double-freed | **0** |
+| Oracle swap | 68 450 checks pairing our encodings, syntaxes and options with libonig'''s own | **12**, all one case, below |
+| Randomized soak | 5 000 000 generated cases against live `libonig` (`ORACLE_SOAK=5000000`) | **0** |
+| Miri | whole test suite, C ABI included | **no undefined behaviour** |
+| wasm32 execution | battery run inside the sandbox under Node, not merely compiled | **0** |
 | Callout verbs, subexp captures, class escapes, line anchors | targeted vs libonig | **0** |
 
 Bugs these gates caught during development — each one invisible to a suite
@@ -141,6 +148,25 @@ that only checks whole-match ranges:
 - `scan` returning the same empty match repeatedly
 - two denial-of-service aborts on untrusted *patterns*: deep nesting, and a
   long chain of quantifiers
+- POSIX BRE groups `\(...\)` unimplemented, so they compiled to literal text
+- `a*?` read as a literal `?` in the dialects where `?` is not the lazy marker
+- CJK prefilters matching the ASCII byte inside a two-byte character
+- `\w` in a CJK encoding asking Unicode about the transcoded codepoint
+- undecodable UTF-8 raising instead of scanning, as libonig does
+- `FIND_LONGEST` returning the first alternative rather than the longest
+- `find_at` past the end of the haystack returning an empty match there
+
+### Known differences from libonig
+
+Twelve of the 68 450 oracle-swap checks differ, all the same case. In the EUC
+encodings, on input that is **not valid** in that encoding, libonig can report
+a match starting inside a character: its character walk treats `AD 61` in
+EUC-JP as one two-byte character, but its literal byte-scan finds the `61` and
+its `left_adjust_char_head` accepts that offset as a character head, so a bare
+`a` matches there. We do not reproduce it — which patterns take that path
+depends on libonig'''s internal optimiser, and reporting a match that begins
+mid-character is the worse of the two answers. On well-formed input the two
+agree everywhere.
 
 ## 🔒 Safety and limits
 
@@ -235,6 +261,30 @@ cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.tom
 cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example constructs_diff
 cargo run --release --manifest-path tools/onig-bench/Cargo.toml --example audit
 cargo run --release --manifest-path tools/onig-bench/Cargo.toml --example reqlit   # what the analyzer found
+
+# Pair our encodings, syntaxes and options with libonig's own and diff everything:
+cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example oracle_audit
+# ...and turn the same generator into a soak:
+ORACLE_SOAK=5000000 cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example oracle_audit
+
+# The C ABI, driven as a careless C caller would:
+cargo run --release --features compat --manifest-path tools/onig-bench/Cargo.toml --example fuzz_compat
+
+# Run the engine inside a wasm32 sandbox, rather than trusting that it compiled:
+cargo build --release --target wasm32-unknown-unknown --manifest-path tools/wasm-smoke/Cargo.toml
+node tools/wasm-smoke/run.js
+
+# No undefined behaviour, C ABI included:
+cargo +nightly miri test --no-default-features --features compat --test expressions
+```
+
+The per-encoding character-class and character-length tables are generated
+from libonig rather than transcribed by hand, and committed so an ordinary
+build never needs the C library:
+
+```sh
+cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example gen_ctype  > src/enc_ctype.rs
+cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example gen_mbclen > src/enc_mbclen.rs
 ```
 
 ## 📄 License
