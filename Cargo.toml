@@ -9,7 +9,7 @@ homepage = "https://www.mata.network/"
 authors = ["Remade With Rust / Mata Network"]
 readme = "README.md"
 documentation = "https://docs.rs/rusty_expressions"
-description = "Oniguruma remade in pure Rust: named groups, look-around, backreferences, subexp calls, absent expressions, callouts, per-regex encodings (UTF-8/16/32, Shift_JIS, Big5, EUC-*, GB18030, ISO-8859-*) and Perl/Python/Java/POSIX/GNU/Emacs/grep syntax dialects. Match-equivalent to Oniguruma 6.9.10 and ~3x faster than libonig. no_std + alloc, wasm32-ready, no C toolchain."
+description = "Oniguruma remade in pure Rust: named groups, look-around, backreferences, subexp calls, absent expressions, callouts, per-regex encodings (UTF-8/16/32, Shift_JIS, Big5, EUC-*, GB18030, ISO-8859-*) and Perl/Python/Java/POSIX/GNU/Emacs/grep syntax dialects. Match-equivalent to Oniguruma 6.9.10 and ~3x faster than libonig. no_std + alloc with default-features = false, runs on wasm32, no C toolchain."
 keywords = ["regex", "oniguruma", "regexp", "unicode", "no-std"]
 categories = ["text-processing", "no-std", "encoding", "parser-implementations"]
 exclude = ["tools/*", "docs/*"]

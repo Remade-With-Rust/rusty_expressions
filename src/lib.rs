@@ -3,8 +3,13 @@
 //! An Oniguruma-class regular-expression engine: named groups, look-around,
 //! backreferences, subexp calls, atomic and possessive groups, absent
 //! expressions, conditionals, callouts, per-regex encodings and pluggable
-//! syntax dialects. No C, no FFI, no `onig-sys`, `no_std` + `alloc`, and it
-//! builds for `wasm32-unknown-unknown`.
+//! syntax dialects. No C, no FFI, no `onig-sys`, and it runs on
+//! `wasm32-unknown-unknown` -- `tools/wasm-smoke` executes a battery there
+//! under Node, rather than trusting that it compiled.
+//!
+//! `no_std` + `alloc` holds with `default-features = false`. The default
+//! `rusty-alloc` feature installs `rusty_alloc` as the global allocator and
+//! brings std with it.
 //!
 //! It is match-equivalent to Oniguruma 6.9.10 on a harvested corpus and on
 //! tens of thousands of differential cases run against live `libonig`, and
@@ -207,7 +212,17 @@ impl Regex {
     }
 
     /// Match only at `at` (Oniguruma `onig_match`).
+    ///
+    /// `at` past the end of `hay` is an error, not an empty match there.
+    /// Without this guard a caller could ask about offset 999 in a two-byte
+    /// haystack and be told, truthfully within the engine and uselessly
+    /// outside it, that the empty string matches at 999 -- offsets a C caller
+    /// would then slice with. `search_range_param` has always checked its
+    /// bounds; this is the same check, found by `--example fuzz_compat`.
     pub fn find_at(&self, hay: &[u8], at: usize) -> Result<Option<Region>, Error> {
+        if at > hay.len() {
+            return Err(Error::kind_msg(ErrorKind::InvalidArgument, "match position"));
+        }
         exec::match_at(
             &self.prog,
             hay,

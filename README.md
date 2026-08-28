@@ -11,7 +11,8 @@
 > Named groups, look-around, backreferences, subexp calls, atomic and
 > possessive groups, absent expressions, conditionals, callouts, per-regex
 > encodings and pluggable syntax dialects. **No C, no FFI, no `onig-sys`**,
-> `no_std` + `alloc`, and it builds for `wasm32-unknown-unknown`.
+> `no_std` + `alloc` (with `default-features = false`), and it **runs** on
+> `wasm32-unknown-unknown` — executed there, not merely compiled.
 >
 > It is **match-equivalent to Oniguruma 6.9.10** — verified on a harvested
 > corpus and on **~180 000 differential and property cases** run against live
@@ -37,7 +38,7 @@ Rust, with the C deleted.
 | | `onig` (FFI to libonig) | rust-lang `regex` | **rusty_expressions** |
 |---|---|---|---|
 | C in the dependency tree | all of it | none | **none** |
-| Builds for `wasm32` | ✗ | ✓ | **✓** |
+| Runs on `wasm32` | ✗ | ✓ | **✓** |
 | Needs a C toolchain | ✓ | ✗ | **✗** |
 | Backreferences | ✓ | ✗ *(by design)* | **✓** |
 | Look-around | ✓ | ✗ *(by design)* | **✓** |

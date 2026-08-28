@@ -781,3 +781,25 @@ fn find_longest_picks_the_longest_alternative() {
     let re = Regex::new_str("a|aa", Options::NONE, Syntax::ONIGURUMA).unwrap();
     assert_eq!(re.search(b"aaa").unwrap().unwrap().range(), 0..1);
 }
+
+/// `find_at` past the end of the haystack is an error, not a match there.
+///
+/// Found by `tools/onig-bench --example fuzz_compat` driving the C ABI with
+/// offsets a careless caller can compute: `onig_match` handed the offset
+/// straight through, and the engine cheerfully reported an empty match at
+/// offset 4 of a two-byte haystack. `search_range_param` had always checked;
+/// this path had not.
+#[test]
+fn find_at_rejects_positions_past_the_haystack() {
+    let re = Regex::new_str("", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    let hay = b"ab";
+    // The last legal position is the end itself.
+    assert_eq!(re.find_at(hay, 2).unwrap().expect("empty match").range(), 2..2);
+    for at in [3usize, 4, 999] {
+        let e = re.find_at(hay, at).expect_err("must reject");
+        assert_eq!(e.kind, ErrorKind::InvalidArgument);
+    }
+    // A real pattern takes the same path.
+    let re = Regex::new_str("a", Options::NONE, Syntax::ONIGURUMA).unwrap();
+    assert!(re.find_at(hay, 99).is_err());
+}

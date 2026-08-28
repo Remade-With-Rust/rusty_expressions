@@ -12,6 +12,8 @@ default = ["rusty-alloc"]
 oracle = ["dep:onig", "dep:onig_sys"]
 # Deterministic VM work counters.
 count = ["rusty_expressions/expr-count"]
+# The Oniguruma-shaped C ABI, so `--example fuzz_compat` can hammer it.
+compat = ["rusty_expressions/compat"]
 # Install rusty_alloc as the global allocator, as a deliverable would.
 # Only affects our arm: libonig allocates through the C runtime.
 rusty-alloc = ["rusty_expressions/rusty-alloc"]

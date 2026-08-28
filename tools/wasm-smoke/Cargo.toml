@@ -1,0 +1,23 @@
+# A real wasm32 execution, not a `cargo check`.
+#
+# Builds a no_std cdylib that runs a battery of matches inside the wasm
+# sandbox and returns the number that came out wrong, so `node run.js` either
+# prints 0 or tells us the engine does not work there. Checking that it
+# COMPILES for wasm32 never proved it runs.
+[package]
+name = "wasm-smoke"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# `default-features = false` is the point: `rusty-alloc` pulls in std, so
+# this is the configuration that actually proves the no_std claim.
+rusty_expressions = { path = "../..", default-features = false }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
