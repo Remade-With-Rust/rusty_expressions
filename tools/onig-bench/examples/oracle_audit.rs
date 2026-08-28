@@ -283,7 +283,16 @@ fn main() {
         r"(?i)ABC", r"\p{L}+", r"(?m)^$", r"\s+", r"[a-z]+?x", r"(?~ab)",
     ];
     let alphabets = ["ab", "ab=c", "a\nb=", "aeiou=z", "0.9 x", "A@b.c", "ing t", "\nab\n", "cat cat"];
-    for _ in 0..60_000 {
+    // Soak knob. The default keeps a full audit quick; `ORACLE_SOAK=5000000`
+    // turns the same generator into an overnight differential run against the
+    // C library. Calendar time in production is the one thing a test cannot
+    // manufacture -- randomized volume against the oracle is what can stand in
+    // for some of it, so make it easy to buy more.
+    let soak: usize = std::env::var("ORACLE_SOAK")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60_000);
+    for _ in 0..soak {
         let pat = rnd_pats[rng.below(rnd_pats.len())];
         let alpha: Vec<char> = alphabets[rng.below(alphabets.len())].chars().collect();
         let n = rng.below(30);
