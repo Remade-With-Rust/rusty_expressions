@@ -1,6 +1,6 @@
 [package]
 name = "rusty_expressions"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 # The DEFAULT build's floor, which is what `cargo add rusty_expressions` gets:
 # the `rusty-alloc` default feature pulls in `rusty_alloc-api`, which is
