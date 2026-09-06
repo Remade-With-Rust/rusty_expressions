@@ -1,3 +1,7 @@
+### In The Wild with 446 Active Installs
+
+FREE RAG Converter Online -- <a href="https://RAGconverter.com">RAGconverter.com</a>
+
 # rusty_expressions
 
 [![crates.io](https://img.shields.io/crates/v/rusty_expressions?logo=rust)](https://crates.io/crates/rusty_expressions)
