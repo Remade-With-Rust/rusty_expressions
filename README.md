@@ -30,7 +30,7 @@ Part of **[Remade With Rust](https://github.com/Remade-With-Rust)** by
 
 ---
 
-## ⚡ The headline
+## The headline
 
 **Oniguruma upstream is finished.** The C project was archived 2025-04-24. Its
 last release carries Unicode 16.0 and years of OSS-Fuzz and Coverity fixes —
@@ -172,7 +172,7 @@ depends on libonig'''s internal optimiser, and reporting a match that begins
 mid-character is the worse of the two answers. On well-formed input the two
 agree everywhere.
 
-## 🔒 Safety and limits
+## Safety and limits
 
 - The engine is **`unsafe_code = "deny"`**. The only `unsafe` in the crate is
   the optional `compat` C ABI, which cannot be expressed safely.
