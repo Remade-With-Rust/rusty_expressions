@@ -55,7 +55,7 @@ Rust, with the C deleted.
 | Syntax dialects | ✓ | ✗ | **✓** |
 | Upstream still maintained | ✗ **archived** | ✓ | **✓** |
 
-## 🏎 Performance — ~3x faster than the C engine
+## Performance — ~3x faster than the C engine
 
 Measured against **live `libonig`** in the same process, 64 KB corpora,
 ABBA-interleaved, medians of 11 rounds, with a null arm establishing the noise
@@ -120,7 +120,7 @@ differential suite stays clean through all of them.
 - **`rusty_alloc`** as the global allocator (default on) is worth a further
   ~21 %.
 
-## ✅ Correctness — gated against the C engine, not against ourselves
+## Correctness — gated against the C engine, not against ourselves
 
 The oracle is **live `libonig`**, never our own output. A remake gated against
 itself gates in its own bugs.
@@ -192,7 +192,7 @@ agree everywhere.
   before we killed it. Reproduce with `--example stress_repeat`; the libonig
   arm is opt-in for exactly this reason.
 
-## 📦 Install
+## Install
 
 ```toml
 [dependencies]
@@ -253,7 +253,7 @@ runtime at once. Choose per call site:
 | A non-default dialect — Perl, Python, Java, POSIX, GNU, Emacs, grep, ASIS | **`rusty_expressions`** |
 | Anything already working on `regex` | **leave it** |
 
-## 🗂 What is implemented
+## What is implemented
 
 Encodings: ASCII, UTF-8, UTF-16BE/LE, UTF-32BE/LE, ISO-8859-1…16, KOI8-R,
 CP1251, EUC-JP, EUC-TW, EUC-KR, EUC-CN, Shift_JIS, Big5, GB18030.
@@ -267,7 +267,7 @@ seam with `(*FAIL)` / `(*MISMATCH)` / `(*SKIP)` / `(*COUNT)` / `(*ERROR)`,
 user-defined Unicode properties, and Unicode 16.0 property tables generated
 from the UCD.
 
-## 🔬 Reproducing the numbers
+## Reproducing the numbers
 
 The benchmark harness links crates.io `onig` (real libonig) purely as a test
 oracle. It is **not** a dependency of this crate.
@@ -304,7 +304,7 @@ cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.tom
 cargo run --release --features oracle --manifest-path tools/onig-bench/Cargo.toml --example gen_mbclen > src/enc_mbclen.rs
 ```
 
-## 📄 License
+## License
 
 MIT. Oniguruma itself is BSD-2; no Oniguruma source was copied — this is a
 reimplementation from `doc/RE`, `doc/API`, `doc/SYNTAX.md` and harvested test
