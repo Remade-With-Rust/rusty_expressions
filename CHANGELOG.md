@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.3](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.2...v0.2.3) - 2026-09-20
+
+### Other
+
+- 536 active installs
+- Update headings in README.md
+- Standardize section headers in README.md
+- 446 active installs
+
 ## [0.2.2](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.1...v0.2.2) - 2026-08-28
 
 ### Other
