@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.3...v0.2.4) - 2026-10-09
+
+### Other
+
+- 791 active installs
+
 ## [0.2.3](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.2...v0.2.3) - 2026-10-08
 
 ### Other
