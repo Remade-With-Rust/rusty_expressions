@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.5](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.4...v0.2.5) - 2026-11-23
+
+### Other
+
+- bump rusty_alloc-api to 2.6.0 ([#15](https://github.com/Remade-With-Rust/rusty_expressions/pull/15))
+- 1,209 active installs
+- 1,116 active installs
+- 970 active installs
+- 894 active installs
+
 ## [0.2.4](https://github.com/Remade-With-Rust/rusty_expressions/compare/v0.2.3...v0.2.4) - 2026-10-17
 
 ### Other
